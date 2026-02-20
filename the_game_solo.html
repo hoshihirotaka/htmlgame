@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>THE GAME 1人用</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg1: #fff0f5;
+      --bg2: #e6f7ff;
+      --ink: #5a3752;
+      --panel: rgba(255, 255, 255, 0.78);
+      --pink: #ff92c8;
+      --blue: #8ed9ff;
+      --ok: #6fd6a1;
+      --bad: #f07f9d;
+      --card: #ffffff;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+      overflow: hidden;
+      font-family: "M PLUS Rounded 1c", sans-serif;
+      background: linear-gradient(180deg, var(--bg1), var(--bg2));
+      color: var(--ink);
+    }
+    .app {
+      width: min(100vw, 560px);
+      height: 100vh;
+      margin: 0 auto;
+      padding: max(10px, env(safe-area-inset-top)) 10px max(12px, env(safe-area-inset-bottom)) 10px;
+      display: grid;
+      grid-template-rows: auto auto auto 1fr auto auto;
+      gap: 8px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 2px solid #fff;
+      border-radius: 14px;
+      padding: 8px 10px;
+    }
+    .top {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .title {
+      font-size: 18px;
+      font-weight: 800;
+    }
+    .stats {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .chip {
+      background: rgba(255,255,255,0.86);
+      border-radius: 10px;
+      padding: 4px 8px;
+    }
+    .action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 12px;
+      padding: 10px;
+      font-family: inherit;
+      font-weight: 800;
+      color: #fff;
+      background: var(--pink);
+      font-size: 15px;
+    }
+    button.secondary {
+      background: var(--blue);
+    }
+    button:disabled {
+      opacity: 0.45;
+    }
+    .msg {
+      min-height: 44px;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+    .piles {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      align-content: start;
+    }
+    .pile {
+      background: rgba(255,255,255,0.84);
+      border: 2px solid #fff;
+      border-radius: 14px;
+      min-height: 98px;
+      padding: 8px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 5px;
+    }
+    .pile h3 {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      color: #7b5d72;
+    }
+    .pile .value {
+      font-size: 32px;
+      text-align: center;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .pile .hint {
+      font-size: 11px;
+      text-align: center;
+      font-weight: 700;
+      color: #8d7687;
+    }
+    .pile.valid {
+      box-shadow: 0 0 0 3px rgba(111, 214, 161, 0.65) inset;
+    }
+    .pile.up .value { color: #ff7fb9; }
+    .pile.down .value { color: #6ec8f9; }
+    .hand-wrap {
+      display: grid;
+      gap: 6px;
+    }
+    .hand-title {
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .hand {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-height: 90px;
+      align-content: flex-start;
+    }
+    .card {
+      width: calc(25% - 5px);
+      min-width: 62px;
+      height: 42px;
+      background: var(--card);
+      border: 2px solid #fff;
+      border-radius: 10px;
+      font-size: 19px;
+      font-weight: 800;
+      color: var(--ink);
+      display: grid;
+      place-items: center;
+    }
+    .card.selected {
+      box-shadow: 0 0 0 3px rgba(255,146,200,0.7) inset;
+      transform: translateY(-1px);
+    }
+    .footer {
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      color: #8a7184;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="panel top">
+      <div>
+        <div class="title">THE GAME 1人用</div>
+        <div class="stats">
+          <div class="chip" id="deckCount">山札: 0</div>
+          <div class="chip" id="turnInfo">ターン: 1</div>
+          <div class="chip" id="needInfo">このターン最低: 2枚</div>
+        </div>
+      </div>
+      <div class="chip" id="playedInfo">出した枚数: 0</div>
+    </div>
+
+    <div class="action-row">
+      <button id="endTurnBtn">ターン終了（補充）</button>
+      <button class="secondary" id="newGameBtn">新しく開始</button>
+    </div>
+
+    <div class="panel msg" id="message"></div>
+
+    <div class="piles" id="piles"></div>
+
+    <div class="panel hand-wrap">
+      <div class="hand-title">手札（数字を選んでから置き場をタップ）</div>
+      <div class="hand" id="hand"></div>
+    </div>
+
+    <div class="footer">昇順は大きい数字へ・降順は小さい数字へ。10戻し（±10）も使えます。</div>
+  </div>
+
+  <script>
+    (() => {
+      const HAND_SIZE = 8;
+      const pilesDef = [
+        { id: 0, type: "up", label: "昇順A", top: 1 },
+        { id: 1, type: "up", label: "昇順B", top: 1 },
+        { id: 2, type: "down", label: "降順A", top: 100 },
+        { id: 3, type: "down", label: "降順B", top: 100 },
+      ];
+
+      const state = {
+        deck: [],
+        hand: [],
+        piles: [],
+        selectedCard: null,
+        playsThisTurn: 0,
+        turn: 1,
+        gameOver: false,
+        won: false,
+      };
+
+      const el = {
+        deckCount: document.getElementById("deckCount"),
+        turnInfo: document.getElementById("turnInfo"),
+        needInfo: document.getElementById("needInfo"),
+        playedInfo: document.getElementById("playedInfo"),
+        message: document.getElementById("message"),
+        hand: document.getElementById("hand"),
+        piles: document.getElementById("piles"),
+        endTurnBtn: document.getElementById("endTurnBtn"),
+        newGameBtn: document.getElementById("newGameBtn"),
+      };
+
+      function shuffle(arr) {
+        for (let i = arr.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const t = arr[i];
+          arr[i] = arr[j];
+          arr[j] = t;
+        }
+      }
+
+      function neededPlaysThisTurn() {
+        return state.deck.length > 0 ? 2 : 1;
+      }
+
+      function canPlayOnPile(card, pile) {
+        if (pile.type === "up") {
+          return card > pile.top || card === pile.top - 10;
+        }
+        return card < pile.top || card === pile.top + 10;
+      }
+
+      function hasAnyMove() {
+        for (let i = 0; i < state.hand.length; i += 1) {
+          for (let j = 0; j < state.piles.length; j += 1) {
+            if (canPlayOnPile(state.hand[i], state.piles[j])) return true;
+          }
+        }
+        return false;
+      }
+
+      function drawToHand() {
+        while (state.hand.length < HAND_SIZE && state.deck.length > 0) {
+          state.hand.push(state.deck.pop());
+        }
+        state.hand.sort((a, b) => a - b);
+      }
+
+      function playedCardsCount() {
+        return 98 - (state.deck.length + state.hand.length);
+      }
+
+      function setMessage(text, good = false, bad = false) {
+        el.message.textContent = text;
+        el.message.style.color = bad ? "var(--bad)" : (good ? "var(--ok)" : "var(--ink)");
+      }
+
+      function selectCard(card) {
+        if (state.gameOver) return;
+        state.selectedCard = state.selectedCard === card ? null : card;
+        render();
+      }
+
+      function tryPlayToPile(pileId) {
+        if (state.gameOver) return;
+        if (state.selectedCard == null) {
+          setMessage("先に手札のカードを選んでください。");
+          return;
+        }
+        const pile = state.piles.find((p) => p.id === pileId);
+        const card = state.selectedCard;
+        if (!canPlayOnPile(card, pile)) {
+          setMessage("その置き場には出せません。");
+          return;
+        }
+        pile.top = card;
+        const idx = state.hand.indexOf(card);
+        if (idx >= 0) state.hand.splice(idx, 1);
+        state.selectedCard = null;
+        state.playsThisTurn += 1;
+        const need = neededPlaysThisTurn();
+        if (state.deck.length === 0 && state.hand.length === 0) {
+          state.gameOver = true;
+          state.won = true;
+          setMessage("98枚すべて出し切り成功！クリアです。", true, false);
+        } else if (hasAnyMove()) {
+          setMessage("カードを出しました。続けて出すか、ターン終了で補充してください。");
+        } else if (state.playsThisTurn >= need) {
+          setMessage("このターンの最低枚数は達成。ターン終了で補充できます。", true, false);
+        } else {
+          state.gameOver = true;
+          setMessage("このターンの必要枚数を満たせず、出せる手もありません。ゲーム終了。", false, true);
+        }
+        render();
+      }
+
+      function endTurn() {
+        if (state.gameOver) return;
+        const need = neededPlaysThisTurn();
+        if (state.playsThisTurn < need) {
+          setMessage("このターンは最低 " + need + " 枚必要です。", false, true);
+          return;
+        }
+
+        drawToHand();
+        state.playsThisTurn = 0;
+        state.turn += 1;
+        state.selectedCard = null;
+
+        if (state.deck.length === 0 && state.hand.length === 0) {
+          state.gameOver = true;
+          state.won = true;
+          setMessage("98枚すべて出し切り成功！クリアです。", true, false);
+        } else if (!hasAnyMove()) {
+          state.gameOver = true;
+          setMessage("出せる手がなくなりました。ゲーム終了。", false, true);
+        } else {
+          setMessage("補充しました。次の手番です。");
+        }
+        render();
+      }
+
+      function renderPiles() {
+        el.piles.innerHTML = "";
+        const selected = state.selectedCard;
+        for (let i = 0; i < state.piles.length; i += 1) {
+          const pile = state.piles[i];
+          const div = document.createElement("button");
+          div.className = "pile " + pile.type;
+          if (selected != null && canPlayOnPile(selected, pile)) div.classList.add("valid");
+          div.innerHTML =
+            "<h3>" + pile.label + "</h3>" +
+            "<div class='value'>" + pile.top + "</div>" +
+            "<div class='hint'>" + (pile.type === "up" ? "大きい数字 or -10" : "小さい数字 or +10") + "</div>";
+          div.onclick = () => tryPlayToPile(pile.id);
+          el.piles.appendChild(div);
+        }
+      }
+
+      function renderHand() {
+        el.hand.innerHTML = "";
+        for (let i = 0; i < state.hand.length; i += 1) {
+          const card = state.hand[i];
+          const btn = document.createElement("button");
+          btn.className = "card" + (state.selectedCard === card ? " selected" : "");
+          btn.textContent = String(card);
+          btn.onclick = () => selectCard(card);
+          el.hand.appendChild(btn);
+        }
+      }
+
+      function render() {
+        const need = neededPlaysThisTurn();
+        el.deckCount.textContent = "山札: " + state.deck.length;
+        el.turnInfo.textContent = "ターン: " + state.turn;
+        el.needInfo.textContent = "このターン最低: " + need + "枚";
+        el.playedInfo.textContent = "出した枚数: " + state.playsThisTurn;
+        el.endTurnBtn.disabled = state.gameOver || state.playsThisTurn < need;
+        renderPiles();
+        renderHand();
+      }
+
+      function startNewGame() {
+        state.deck = [];
+        for (let n = 2; n <= 99; n += 1) state.deck.push(n);
+        shuffle(state.deck);
+
+        state.piles = pilesDef.map((p) => ({ ...p }));
+        state.hand = [];
+        state.selectedCard = null;
+        state.playsThisTurn = 0;
+        state.turn = 1;
+        state.gameOver = false;
+        state.won = false;
+
+        drawToHand();
+        setMessage("ゲーム開始。最初のターンは最低2枚出してください。");
+        render();
+      }
+
+      el.endTurnBtn.addEventListener("click", endTurn);
+      el.newGameBtn.addEventListener("click", startNewGame);
+
+      startNewGame();
+    })();
+  </script>
+</body>
+</html>

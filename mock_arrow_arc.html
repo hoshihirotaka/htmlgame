@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ゆめかわアーチャー モック</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg1: #fff0f5;
+      --bg2: #e8f8ff;
+      --ink: #5d3850;
+      --panel: rgba(255, 255, 255, 0.8);
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      background: linear-gradient(180deg, var(--bg1), var(--bg2));
+      font-family: "M PLUS Rounded 1c", sans-serif;
+    }
+    #ui {
+      position: fixed;
+      left: max(12px, env(safe-area-inset-left));
+      top: max(12px, env(safe-area-inset-top));
+      padding: 10px 14px;
+      border-radius: 14px;
+      background: var(--panel);
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 14px;
+      z-index: 2;
+      max-width: min(88vw, 460px);
+    }
+    #orientation {
+      position: fixed;
+      left: 50%;
+      top: max(12px, env(safe-area-inset-top));
+      transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 12px;
+      background: rgba(93, 56, 80, 0.78);
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 700;
+      z-index: 3;
+      display: none;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">長押しでチャージ、ドラッグで方向、離して発射</div>
+  <div id="orientation">縦持ち推奨</div>
+  <canvas id="game"></canvas>
+  <script>
+    (() => {
+      const canvas = document.getElementById("game");
+      const ctx = canvas.getContext("2d");
+      const ui = document.getElementById("ui");
+      const orientation = document.getElementById("orientation");
+
+      let w = 0;
+      let h = 0;
+      const gravity = 980;
+
+      const gameRect = { x: 0, y: 0, w: 0, h: 0 };
+      const gameAspect = 9 / 16;
+      let groundY = 0;
+
+      const shooter = { x: 90, y: 0 };
+      const skillBtn = { x: 0, y: 0, w: 132, h: 44 };
+
+      const arrows = [];
+      const enemies = [];
+      const pops = [];
+
+      const chargeMinMs = 80;
+      const chargeMaxMs = 1400;
+      const speedMin = 460;
+      const speedMax = 980;
+
+      let isPressing = false;
+      let pressStartMs = 0;
+      let currentAimAngle = -0.45;
+      let enemyIdSeq = 1;
+
+      let skillGauge = 0;
+      let flashUntil = 0;
+      let bannerText = "";
+      let bannerUntil = 0;
+      let gameFinished = false;
+      let stageClearReadyAt = 0;
+
+      const stages = [
+        { name: "ステージ1", simultaneous: 3, waves: [{ type: "Balloon", count: 8 }] },
+        { name: "ステージ2", simultaneous: 4, waves: [{ type: "Balloon", count: 6 }, { type: "Wisp", count: 6 }] },
+        { name: "ステージ3", simultaneous: 5, waves: [{ type: "Wisp", count: 8 }, { type: "Bat", count: 6 }] },
+        { name: "ステージ4", simultaneous: 5, waves: [{ type: "Bat", count: 8 }, { type: "ArmorDrone", count: 6 }] },
+        { name: "ステージ5", simultaneous: 6, waves: [{ type: "Wisp", count: 6 }, { type: "Bat", count: 6 }, { type: "ArmorDrone", count: 6 }] },
+      ];
+
+      const enemyDefs = {
+        Balloon: { maxHp: 24, r: 18, speed: 40, color: "#ff9ecf" },
+        Wisp: { maxHp: 34, r: 17, speed: 58, color: "#aecdff" },
+        Bat: { maxHp: 42, r: 18, speed: 76, color: "#bea7ff" },
+        ArmorDrone: { maxHp: 84, r: 22, speed: 62, color: "#8cb2c9" },
+      };
+
+      let stageIndex = 0;
+      let stageSpawned = 0;
+      let stageDefeated = 0;
+      let stageTotal = 0;
+      let spawnQueue = [];
+
+      function clamp(v, min, max) {
+        return Math.max(min, Math.min(max, v));
+      }
+
+      function pointInRect(x, y, r) {
+        return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+      }
+
+      function shuffle(arr) {
+        for (let i = arr.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const t = arr[i];
+          arr[i] = arr[j];
+          arr[j] = t;
+        }
+      }
+
+      function showBanner(text, durationMs) {
+        bannerText = text;
+        bannerUntil = performance.now() + durationMs;
+      }
+
+      function resize() {
+        w = window.innerWidth;
+        h = window.innerHeight;
+
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.floor(w * dpr);
+        canvas.height = Math.floor(h * dpr);
+        canvas.style.width = w + "px";
+        canvas.style.height = h + "px";
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        let gw = w;
+        let gh = h;
+        if (gw / gh > gameAspect) {
+          gw = gh * gameAspect;
+        } else {
+          gh = gw / gameAspect;
+        }
+        gameRect.w = gw;
+        gameRect.h = gh;
+        gameRect.x = (w - gw) * 0.5;
+        gameRect.y = (h - gh) * 0.5;
+        groundY = gameRect.y + gameRect.h * 0.66;
+
+        skillBtn.x = gameRect.x + gameRect.w - skillBtn.w - 12;
+        skillBtn.y = gameRect.y + gameRect.h - skillBtn.h - 12;
+
+        const portrait = h >= w;
+        shooter.x = gameRect.x + (portrait ? Math.max(70, gameRect.w * 0.18) : Math.max(64, gameRect.w * 0.12));
+        shooter.y = groundY - (portrait ? 22 : 16);
+        orientation.style.display = portrait ? "none" : "block";
+      }
+
+      function getAimAngle(targetX, targetY) {
+        const dx = targetX - shooter.x;
+        const dy = targetY - shooter.y;
+        let angle = Math.atan2(dy, dx);
+        angle = clamp(angle, -Math.PI / 2, -0.2);
+        return angle;
+      }
+
+      function getChargeRatio(nowMs) {
+        if (!isPressing) return 0;
+        const held = nowMs - pressStartMs;
+        return clamp((held - chargeMinMs) / (chargeMaxMs - chargeMinMs), 0, 1);
+      }
+
+      function spawnArrow(angle, chargeRatio) {
+        const speed = speedMin + (speedMax - speedMin) * chargeRatio;
+        arrows.push({
+          x: shooter.x + 24,
+          y: shooter.y - 8,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 0,
+          trail: [],
+          angle,
+          damage: 10 + chargeRatio * 12,
+          hitEnemyIds: new Set(),
+        });
+      }
+
+      function setStage(index) {
+        stageIndex = index;
+        stageSpawned = 0;
+        stageDefeated = 0;
+        stageClearReadyAt = 0;
+        spawnQueue = [];
+        enemies.length = 0;
+        arrows.length = 0;
+
+        const stage = stages[stageIndex];
+        for (let i = 0; i < stage.waves.length; i += 1) {
+          const wv = stage.waves[i];
+          for (let k = 0; k < wv.count; k += 1) spawnQueue.push(wv.type);
+        }
+        shuffle(spawnQueue);
+        stageTotal = spawnQueue.length;
+        ensureEnemyCount();
+        showBanner(stage.name + " 開始", 1000);
+      }
+
+      function spawnEnemy(type) {
+        const def = enemyDefs[type];
+        if (!def) return;
+
+        const minX = gameRect.x + Math.max(230, gameRect.w * 0.42);
+        const maxX = gameRect.x + gameRect.w - 34;
+        const minY = gameRect.y + 88;
+        const maxY = groundY - 110;
+        const x = minX + Math.random() * Math.max(20, maxX - minX);
+        const y = minY + Math.random() * Math.max(20, maxY - minY);
+
+        enemies.push({
+          id: enemyIdSeq++,
+          type,
+          x,
+          y,
+          baseY: y,
+          r: def.r,
+          maxHp: def.maxHp,
+          hp: def.maxHp,
+          color: def.color,
+          dirX: Math.random() > 0.5 ? 1 : -1,
+          dirY: Math.random() > 0.5 ? 1 : -1,
+          baseSpeed: def.speed,
+          t: Math.random() * Math.PI * 2,
+          dashCool: 0.7 + Math.random(),
+        });
+
+        stageSpawned += 1;
+      }
+
+      function ensureEnemyCount() {
+        if (gameFinished) return;
+        const stage = stages[stageIndex];
+        while (enemies.length < stage.simultaneous && stageSpawned < stageTotal) {
+          spawnEnemy(spawnQueue[stageSpawned]);
+        }
+      }
+
+      function updateEnemies(dt) {
+        for (let i = 0; i < enemies.length; i += 1) {
+          const e = enemies[i];
+          e.t += dt;
+          const speed = e.baseSpeed + Math.sin(e.t * 1.3) * 6;
+
+          if (e.type === "Balloon") {
+            e.x += e.dirX * speed * dt;
+            e.y = e.baseY + Math.sin(e.t * 2) * 10;
+          } else if (e.type === "Wisp") {
+            e.x += e.dirX * speed * dt;
+            e.y = e.baseY + Math.sin(e.t * 3.2) * 22;
+          } else if (e.type === "Bat") {
+            e.x += e.dirX * speed * dt;
+            e.y += e.dirY * speed * 0.6 * dt;
+          } else if (e.type === "ArmorDrone") {
+            e.dashCool -= dt;
+            let move = speed;
+            if (e.dashCool <= 0) {
+              move *= 2.2;
+              e.dashCool = 0.7 + Math.random() * 1.1;
+            }
+            e.x += e.dirX * move * dt;
+            e.y = e.baseY + Math.sin(e.t * 2.6) * 16;
+          }
+
+          const minX = gameRect.x + Math.max(230, gameRect.w * 0.42) + e.r;
+          const maxX = gameRect.x + gameRect.w - 24 - e.r;
+          const minY = gameRect.y + 60 + e.r;
+          const maxY = groundY - 82 - e.r;
+          if (e.x < minX) { e.x = minX; e.dirX = 1; }
+          if (e.x > maxX) { e.x = maxX; e.dirX = -1; }
+          if (e.y < minY) { e.y = minY; e.dirY = 1; }
+          if (e.y > maxY) { e.y = maxY; e.dirY = -1; }
+        }
+      }
+
+      function drawBackground() {
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, "#fff0f5");
+        grad.addColorStop(1, "#e8f8ff");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.fillStyle = "rgba(255,255,255,0.45)";
+        ctx.fillRect(0, 0, gameRect.x, h);
+        ctx.fillRect(gameRect.x + gameRect.w, 0, w - (gameRect.x + gameRect.w), h);
+        ctx.fillRect(gameRect.x, 0, gameRect.w, gameRect.y);
+        ctx.fillRect(gameRect.x, gameRect.y + gameRect.h, gameRect.w, h - (gameRect.y + gameRect.h));
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(gameRect.x, gameRect.y, gameRect.w, gameRect.h);
+        ctx.clip();
+
+        const innerGrad = ctx.createLinearGradient(0, gameRect.y, 0, gameRect.y + gameRect.h);
+        innerGrad.addColorStop(0, "#fff0f5");
+        innerGrad.addColorStop(1, "#e8f8ff");
+        ctx.fillStyle = innerGrad;
+        ctx.fillRect(gameRect.x, gameRect.y, gameRect.w, gameRect.h);
+
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.beginPath();
+        ctx.ellipse(gameRect.x + gameRect.w * 0.25, groundY + 62, gameRect.w * 0.45, 120, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(gameRect.x + gameRect.w * 0.82, groundY + 58, gameRect.w * 0.52, 150, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+
+        ctx.strokeStyle = "rgba(255,255,255,0.95)";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(gameRect.x, gameRect.y, gameRect.w, gameRect.h);
+      }
+
+      function drawShooter() {
+        ctx.save();
+        ctx.translate(shooter.x, shooter.y);
+
+        ctx.fillStyle = "#ff8fc2";
+        ctx.beginPath();
+        ctx.arc(0, 0, 26, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = "#8fd8ff";
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(20, -5, 24, -1.45, 1.45);
+        ctx.stroke();
+
+        ctx.restore();
+      }
+
+      function drawEnemies() {
+        for (let i = 0; i < enemies.length; i += 1) {
+          const e = enemies[i];
+          ctx.fillStyle = e.color;
+          ctx.beginPath();
+          ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = "rgba(255,255,255,0.8)";
+          ctx.beginPath();
+          ctx.arc(e.x - e.r * 0.3, e.y - e.r * 0.32, e.r * 0.22, 0, Math.PI * 2);
+          ctx.fill();
+
+          const hpRatio = clamp(e.hp / e.maxHp, 0, 1);
+          const bw = Math.max(24, e.r * 2.2);
+          const bh = 5;
+          const bx = e.x - bw * 0.5;
+          const by = e.y - e.r - 11;
+          ctx.fillStyle = "rgba(255,255,255,0.8)";
+          ctx.fillRect(bx, by, bw, bh);
+          ctx.fillStyle = "#ff5ca8";
+          ctx.fillRect(bx, by, bw * hpRatio, bh);
+        }
+      }
+
+      function drawAimGuide(nowMs) {
+        if (!isPressing || gameFinished) return;
+        const ratio = getChargeRatio(nowMs);
+        const guideLen = 120 + ratio * 80;
+        const sx = shooter.x + 20;
+        const sy = shooter.y - 8;
+        const ex = sx + Math.cos(currentAimAngle) * guideLen;
+        const ey = sy + Math.sin(currentAimAngle) * guideLen;
+
+        ctx.strokeStyle = "rgba(255,255,255,0.95)";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+
+        const bx = gameRect.x + 12;
+        const by = gameRect.y + gameRect.h - 26;
+        ctx.fillStyle = "rgba(255,255,255,0.88)";
+        ctx.fillRect(bx, by, 220, 12);
+        ctx.fillStyle = "rgba(255,143,194,0.95)";
+        ctx.fillRect(bx, by, 220 * ratio, 12);
+      }
+
+      function drawTrail(a) {
+        if (a.trail.length < 2) return;
+        ctx.strokeStyle = "rgba(255,255,255,0.55)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(a.trail[0].x, a.trail[0].y);
+        for (let i = 1; i < a.trail.length; i += 1) {
+          ctx.lineTo(a.trail[i].x, a.trail[i].y);
+        }
+        ctx.stroke();
+      }
+
+      function drawArrow(a) {
+        ctx.save();
+        ctx.translate(a.x, a.y);
+        ctx.rotate(a.angle);
+
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(-18, 0);
+        ctx.lineTo(16, 0);
+        ctx.stroke();
+
+        ctx.fillStyle = "#ff8fc2";
+        ctx.beginPath();
+        ctx.moveTo(16, 0);
+        ctx.lineTo(8, -5);
+        ctx.lineTo(8, 5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
+      }
+
+      function spawnPop(x, y) {
+        pops.push({ x, y, t: 0, life: 0.22 });
+      }
+
+      function updateAndDrawPops(dt) {
+        for (let i = pops.length - 1; i >= 0; i -= 1) {
+          const p = pops[i];
+          p.t += dt;
+          const ratio = p.t / p.life;
+          const radius = 8 + ratio * 26;
+          const alpha = Math.max(0, 1 - ratio);
+          ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+          ctx.stroke();
+          if (p.t >= p.life) pops.splice(i, 1);
+        }
+      }
+
+      function addSkill(v) {
+        skillGauge = clamp(skillGauge + v, 0, 100);
+      }
+
+      function useSkill() {
+        if (skillGauge < 100 || gameFinished) return false;
+        skillGauge = 0;
+        flashUntil = performance.now() + 180;
+
+        for (let i = enemies.length - 1; i >= 0; i -= 1) {
+          const e = enemies[i];
+          e.hp -= 40;
+          spawnPop(e.x, e.y);
+          if (e.hp <= 0) {
+            enemies.splice(i, 1);
+            stageDefeated += 1;
+          }
+        }
+        ensureEnemyCount();
+        return true;
+      }
+
+      function handleHits() {
+        for (let ai = arrows.length - 1; ai >= 0; ai -= 1) {
+          const a = arrows[ai];
+          for (let ei = enemies.length - 1; ei >= 0; ei -= 1) {
+            const e = enemies[ei];
+            if (a.hitEnemyIds.has(e.id)) continue;
+            const dx = a.x - e.x;
+            const dy = a.y - e.y;
+            const d2 = dx * dx + dy * dy;
+            const hitR = e.r + 4;
+            if (d2 <= hitR * hitR) {
+              e.hp -= a.damage;
+              a.hitEnemyIds.add(e.id);
+              spawnPop(e.x, e.y);
+              addSkill(12);
+              if (e.hp <= 0) {
+                enemies.splice(ei, 1);
+                stageDefeated += 1;
+              }
+            }
+          }
+        }
+      }
+
+      function drawHud(now) {
+        const remain = Math.max(0, stageTotal - stageDefeated);
+        const stage = stages[stageIndex];
+
+        const topX = gameRect.x + 10;
+        const topY = gameRect.y + 10;
+        const panelW = gameRect.w - 20;
+
+        ctx.fillStyle = "rgba(255,255,255,0.78)";
+        ctx.fillRect(topX, topY, panelW, 56);
+
+        ctx.fillStyle = "#5d3850";
+        ctx.font = "700 14px 'M PLUS Rounded 1c', sans-serif";
+        ctx.fillText(`${stage.name}  残り ${remain} / ${stageTotal}`, topX + 10, topY + 22);
+
+        const gX = topX + 10;
+        const gY = topY + 34;
+        const gW = panelW - 164;
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.fillRect(gX, gY, gW, 12);
+        ctx.fillStyle = "#ff8fc2";
+        ctx.fillRect(gX, gY, gW * (skillGauge / 100), 12);
+        ctx.fillStyle = "#5d3850";
+        ctx.font = "700 11px 'M PLUS Rounded 1c', sans-serif";
+        ctx.fillText(`スキル ${Math.round(skillGauge)} / 100`, gX + 4, gY + 10);
+
+        const ready = skillGauge >= 100;
+        ctx.fillStyle = ready ? "#ff5ca8" : "#ff8fc2";
+        ctx.fillRect(skillBtn.x, skillBtn.y, skillBtn.w, skillBtn.h);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(skillBtn.x, skillBtn.y, skillBtn.w, skillBtn.h);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "800 16px 'M PLUS Rounded 1c', sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("スキル発動", skillBtn.x + skillBtn.w * 0.5, skillBtn.y + 28);
+        ctx.textAlign = "left";
+
+        if (bannerUntil > now) {
+          ctx.fillStyle = "rgba(255,255,255,0.96)";
+          ctx.font = "800 26px 'M PLUS Rounded 1c', sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(bannerText, gameRect.x + gameRect.w * 0.5, gameRect.y + gameRect.h * 0.22);
+          ctx.textAlign = "left";
+        }
+
+        if (flashUntil > now) {
+          ctx.fillStyle = "rgba(255,255,255,0.6)";
+          ctx.fillRect(gameRect.x, gameRect.y, gameRect.w, gameRect.h);
+        }
+      }
+
+      let last = performance.now();
+      function tick(now) {
+        const dt = Math.min((now - last) / 1000, 0.033);
+        last = now;
+
+        drawBackground();
+        updateEnemies(dt);
+        drawEnemies();
+
+        drawShooter();
+        drawAimGuide(now);
+
+        for (let i = arrows.length - 1; i >= 0; i -= 1) {
+          const a = arrows[i];
+          a.vy += gravity * dt;
+          a.x += a.vx * dt;
+          a.y += a.vy * dt;
+          a.angle = Math.atan2(a.vy, a.vx);
+          a.life += dt;
+
+          a.trail.push({ x: a.x, y: a.y });
+          if (a.trail.length > 22) a.trail.shift();
+
+          drawTrail(a);
+          drawArrow(a);
+
+          if (
+            a.x < gameRect.x - 80 ||
+            a.x > gameRect.x + gameRect.w + 80 ||
+            a.y < gameRect.y - 120 ||
+            a.y > gameRect.y + gameRect.h + 80 ||
+            a.life > 8
+          ) {
+            arrows.splice(i, 1);
+          }
+        }
+
+        handleHits();
+        updateAndDrawPops(dt);
+        ensureEnemyCount();
+        drawHud(now);
+
+        const degree = Math.round((currentAimAngle * 180) / Math.PI);
+        const power = Math.round((speedMin + (speedMax - speedMin) * getChargeRatio(now)) / 10) * 10;
+        const remain = stageTotal - stageDefeated;
+
+        if (gameFinished) {
+          ui.textContent = "全ステージクリア！";
+        } else if (remain <= 0 && enemies.length === 0) {
+          ui.textContent = "クリア処理中...";
+        } else {
+          ui.textContent = isPressing
+            ? `角度 ${degree}° / パワー ${power} / 残り ${remain} / スキル ${Math.round(skillGauge)}`
+            : `長押しでチャージ、ドラッグで方向、離して発射 / 残り ${remain} / スキル ${Math.round(skillGauge)}`;
+        }
+
+        if (!gameFinished && remain <= 0 && enemies.length === 0) {
+          if (!stageClearReadyAt) {
+            if (stageIndex >= stages.length - 1) {
+              gameFinished = true;
+              showBanner("全ステージクリア!", 2000);
+            } else {
+              stageClearReadyAt = now + 900;
+              showBanner("ステージクリア!", 800);
+            }
+          } else if (now >= stageClearReadyAt) {
+            setStage(stageIndex + 1);
+            stageClearReadyAt = 0;
+          }
+        }
+
+        requestAnimationFrame(tick);
+      }
+
+      canvas.addEventListener("pointerdown", (e) => {
+        if (!pointInRect(e.clientX, e.clientY, gameRect)) return;
+
+        if (pointInRect(e.clientX, e.clientY, skillBtn)) {
+          useSkill();
+          return;
+        }
+
+        if (gameFinished) return;
+
+        isPressing = true;
+        pressStartMs = performance.now();
+        currentAimAngle = getAimAngle(e.clientX, e.clientY);
+      });
+
+      canvas.addEventListener("pointermove", (e) => {
+        if (!isPressing) return;
+        currentAimAngle = getAimAngle(e.clientX, e.clientY);
+      });
+
+      canvas.addEventListener("pointerup", () => {
+        if (!isPressing) return;
+        const ratio = getChargeRatio(performance.now());
+        isPressing = false;
+        spawnArrow(currentAimAngle, ratio);
+      });
+
+      canvas.addEventListener("pointercancel", () => {
+        isPressing = false;
+      });
+
+      window.addEventListener("resize", resize);
+      resize();
+      setStage(0);
+      requestAnimationFrame(tick);
+    })();
+  </script>
+</body>
+</html>

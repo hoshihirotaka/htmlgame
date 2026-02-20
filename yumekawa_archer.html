@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ゆめかわアーチャー</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #fff0f5;
+      --bg2: #e5f8ff;
+      --accent: #ff8fc2;
+      --accent2: #8fd8ff;
+      --ink: #62354d;
+      --panel: rgba(255, 255, 255, 0.72);
+      --border: #ffffff;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      touch-action: none;
+      background: linear-gradient(180deg, var(--bg), var(--bg2));
+      font-family: "M PLUS Rounded 1c", sans-serif;
+    }
+    #game-root {
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+    canvas {
+      display: block;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-root"></div>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+  <script>
+    (() => {
+      const STAGES = [
+        { name: "ステージ1", waves: [{ type: "Balloon", count: 8 }], simultaneous: 3 },
+        { name: "ステージ2", waves: [{ type: "Balloon", count: 6 }, { type: "Wisp", count: 6 }], simultaneous: 4 },
+        { name: "ステージ3", waves: [{ type: "Wisp", count: 8 }, { type: "Bat", count: 6 }], simultaneous: 5 },
+        { name: "ステージ4", waves: [{ type: "Bat", count: 8 }, { type: "ArmorDrone", count: 6 }], simultaneous: 5 },
+        { name: "ステージ5", waves: [{ type: "Wisp", count: 6 }, { type: "Bat", count: 6 }, { type: "ArmorDrone", count: 6 }], simultaneous: 6 },
+      ];
+
+      const ENEMY_DATA = {
+        Balloon: { hp: 20, color: 0xff9ecf, radius: 20, baseSpeed: 42 },
+        Wisp: { hp: 35, color: 0xaecfff, radius: 18, baseSpeed: 58 },
+        Bat: { hp: 40, color: 0xbea7ff, radius: 19, baseSpeed: 80 },
+        ArmorDrone: { hp: 80, color: 0x8cb2c9, radius: 24, baseSpeed: 62 },
+      };
+
+      class MainScene extends Phaser.Scene {
+        constructor() {
+          super("MainScene");
+          this.currentStageIndex = 0;
+        }
+
+        create() {
+          this.worldW = this.scale.width;
+          this.worldH = this.scale.height;
+          this.physics.world.gravity.y = 500;
+          this.cameras.main.setBackgroundColor("#fff0f5");
+
+          this.drawBackground();
+          this.setupState();
+          this.createPlayer();
+          this.createUi();
+          this.createInput();
+
+          this.arrows = this.physics.add.group();
+          this.enemies = this.physics.add.group();
+
+          this.physics.add.overlap(this.arrows, this.enemies, this.onArrowHit, null, this);
+
+          this.loadStage(0);
+        }
+
+        setupState() {
+          this.isPressing = false;
+          this.aimAngle = -0.42;
+          this.chargeStartTime = 0;
+          this.canShoot = true;
+          this.maxChargeMs = 1500;
+          this.skillGauge = 0;
+          this.stageDefeated = 0;
+          this.stageTotal = 0;
+          this.stageSpawned = 0;
+          this.spawnQueue = [];
+          this.lastStageClearTime = 0;
+        }
+
+        drawBackground() {
+          const g = this.add.graphics();
+          g.fillGradientStyle(0xfff0f5, 0xfff0f5, 0xe5f8ff, 0xe5f8ff, 1);
+          g.fillRect(0, 0, this.worldW, this.worldH);
+
+          const hill = this.add.graphics();
+          hill.fillStyle(0xffffff, 0.8);
+          hill.fillEllipse(this.worldW * 0.2, this.worldH + 20, this.worldW * 0.8, 220);
+          hill.fillEllipse(this.worldW * 0.75, this.worldH + 10, this.worldW * 0.9, 280);
+
+          for (let i = 0; i < 8; i += 1) {
+            const x = (i + 0.5) * (this.worldW / 8);
+            const y = 70 + (i % 2) * 20;
+            const cloud = this.add.graphics();
+            cloud.fillStyle(0xffffff, 0.7);
+            cloud.fillCircle(x, y, 22);
+            cloud.fillCircle(x + 24, y + 3, 16);
+            cloud.fillCircle(x - 22, y + 4, 14);
+          }
+        }
+
+        createPlayer() {
+          this.playerPos = new Phaser.Math.Vector2(90, this.worldH - 130);
+          this.player = this.add.container(this.playerPos.x, this.playerPos.y);
+
+          const body = this.add.circle(0, 0, 26, 0xff8fc2);
+          const face = this.add.circle(-6, -4, 16, 0xffd6e8);
+          const eyeL = this.add.circle(-11, -8, 2, 0x62354d);
+          const eyeR = this.add.circle(-2, -8, 2, 0x62354d);
+          const bow = this.add.arc(18, -6, 26, -85, 85, false, 0x8fd8ff, 0.2);
+          bow.setStrokeStyle(5, 0x8fd8ff, 1);
+
+          this.player.add([body, face, eyeL, eyeR, bow]);
+
+          this.aimLine = this.add.graphics();
+        }
+
+        createUi() {
+          const panelStyle = { fontFamily: "M PLUS Rounded 1c", color: "#62354d", fontSize: "22px", fontStyle: "700" };
+          this.stageText = this.add.text(16, 14, "", panelStyle).setDepth(10);
+          this.remainText = this.add.text(16, 44, "", panelStyle).setDepth(10);
+
+          this.skillLabel = this.add.text(this.worldW - 210, 16, "スキル", panelStyle).setDepth(10);
+          this.skillBarBg = this.add.rectangle(this.worldW - 100, 50, 180, 20, 0xffffff, 0.8).setStrokeStyle(2, 0xffffff);
+          this.skillBar = this.add.rectangle(this.worldW - 190, 50, 0, 14, 0xff8fc2, 1).setOrigin(0, 0.5).setDepth(11);
+
+          this.chargeLabel = this.add.text(16, this.worldH - 78, "チャージ", panelStyle).setDepth(10);
+          this.chargeBarBg = this.add.rectangle(130, this.worldH - 62, 230, 22, 0xffffff, 0.78).setOrigin(0, 0.5).setStrokeStyle(2, 0xffffff);
+          this.chargeBar = this.add.rectangle(134, this.worldH - 62, 0, 14, 0x8fd8ff, 1).setOrigin(0, 0.5).setDepth(11);
+
+          this.skillButton = this.add.container(this.worldW - 105, this.worldH - 58).setDepth(20);
+          const btnBg = this.add.rectangle(0, 0, 160, 56, 0xff8fc2, 1);
+          btnBg.setStrokeStyle(3, 0xffffff);
+          const btnText = this.add.text(0, 0, "スキル発動", { fontFamily: "M PLUS Rounded 1c", fontSize: "22px", color: "#ffffff", fontStyle: "800" }).setOrigin(0.5);
+          this.skillButton.add([btnBg, btnText]);
+          this.skillButtonBg = btnBg;
+          btnBg.setInteractive();
+          btnBg.on("pointerdown", () => this.useSkill());
+        }
+
+        createInput() {
+          this.input.on("pointerdown", (pointer) => {
+            if (pointer.x > this.worldW - 200 && pointer.y > this.worldH - 100) return;
+            this.isPressing = true;
+            this.chargeStartTime = this.time.now;
+            this.updateAim(pointer);
+          });
+
+          this.input.on("pointermove", (pointer) => {
+            if (!this.isPressing) return;
+            this.updateAim(pointer);
+          });
+
+          this.input.on("pointerup", (pointer) => {
+            if (!this.isPressing) return;
+            this.isPressing = false;
+            if (this.canShoot) this.shootArrow(pointer);
+            this.chargeBar.width = 0;
+          });
+        }
+
+        update(_, delta) {
+          this.updateAimLine();
+          this.updateChargeBar();
+          this.updateArrows(delta);
+          this.updateEnemies(delta);
+          this.checkStageClear();
+        }
+
+        updateAim(pointer) {
+          if (!pointer || !Number.isFinite(pointer.x) || !Number.isFinite(pointer.y)) return;
+          const vx = pointer.x - this.playerPos.x;
+          const vy = pointer.y - this.playerPos.y;
+          if (!Number.isFinite(vx) || !Number.isFinite(vy)) return;
+          let angle = Math.atan2(vy, vx);
+          if (!Number.isFinite(angle)) return;
+          angle = Phaser.Math.Clamp(angle, -1.2, -0.2);
+          this.aimAngle = angle;
+        }
+
+        updateAimLine() {
+          const power = this.getChargeMultiplier();
+          const lineLen = 70 + power * 50;
+          const ex = this.playerPos.x + Math.cos(this.aimAngle) * lineLen;
+          const ey = this.playerPos.y + Math.sin(this.aimAngle) * lineLen;
+          this.aimLine.clear();
+          this.aimLine.lineStyle(4, 0xffffff, 0.95);
+          this.aimLine.beginPath();
+          this.aimLine.moveTo(this.playerPos.x + 14, this.playerPos.y - 6);
+          this.aimLine.lineTo(ex, ey);
+          this.aimLine.strokePath();
+        }
+
+        updateChargeBar() {
+          if (!this.isPressing) return;
+          const ratio = this.getChargeRatio();
+          this.chargeBar.width = 222 * ratio;
+        }
+
+        getChargeRatio() {
+          const heldMs = this.time.now - this.chargeStartTime;
+          return Phaser.Math.Clamp(heldMs / this.maxChargeMs, 0, 1);
+        }
+
+        getChargeMultiplier() {
+          return 1 + this.getChargeRatio() * 1.2;
+        }
+
+        shootArrow(pointer) {
+          this.canShoot = false;
+          this.time.delayedCall(260, () => { this.canShoot = true; });
+
+          if (pointer) this.updateAim(pointer);
+          const charge = this.getChargeMultiplier();
+          const speed = 430 * charge;
+          const startX = this.playerPos.x + 18;
+          const startY = this.playerPos.y - 10;
+          const safeAngle = Number.isFinite(this.aimAngle) ? this.aimAngle : -0.42;
+          const rawVx = Math.cos(safeAngle) * speed;
+          const vx = Math.max(180, rawVx);
+          const vy = Math.sin(safeAngle) * speed;
+
+          const arrow = this.add.rectangle(startX, startY, 44, 6, 0xffffff).setDepth(6);
+          this.physics.add.existing(arrow);
+          arrow.body.allowGravity = true;
+          arrow.body.setVelocity(vx, vy);
+          arrow.body.setSize(44, 6);
+          arrow.damage = 10 * charge;
+          this.arrows.add(arrow);
+        }
+
+        updateArrows() {
+          this.arrows.children.each((arrow) => {
+            if (!arrow || !arrow.body) return;
+            arrow.rotation = arrow.body.velocity.angle();
+            if (arrow.x < -50 || arrow.x > this.worldW + 50 || arrow.y > this.worldH + 80) {
+              arrow.destroy();
+            }
+          });
+        }
+
+        onArrowHit(arrow, enemy) {
+          if (!arrow.active || !enemy.active) return;
+          arrow.destroy();
+          enemy.hp -= arrow.damage;
+          this.addHitFx(enemy.x, enemy.y);
+          this.addSkill(12);
+          if (enemy.hp <= 0) {
+            this.defeatEnemy(enemy);
+          }
+        }
+
+        addHitFx(x, y) {
+          const s = this.add.circle(x, y, 8, 0xffffff, 0.95);
+          this.tweens.add({
+            targets: s,
+            scale: 3,
+            alpha: 0,
+            duration: 180,
+            onComplete: () => s.destroy(),
+          });
+        }
+
+        addSkill(amount) {
+          this.skillGauge = Phaser.Math.Clamp(this.skillGauge + amount, 0, 100);
+          this.refreshSkillUi();
+        }
+
+        refreshSkillUi() {
+          this.skillBar.width = 176 * (this.skillGauge / 100);
+          const isReady = this.skillGauge >= 100;
+          this.skillButtonBg.fillColor = isReady ? 0xff5ca8 : 0xff8fc2;
+        }
+
+        useSkill() {
+          if (this.skillGauge < 100) return;
+          this.skillGauge = 0;
+          this.refreshSkillUi();
+
+          const flash = this.add.rectangle(this.worldW / 2, this.worldH / 2, this.worldW, this.worldH, 0xffffff, 0.55).setDepth(50);
+          this.tweens.add({
+            targets: flash,
+            alpha: 0,
+            duration: 260,
+            onComplete: () => flash.destroy(),
+          });
+
+          const toKill = [];
+          this.enemies.children.each((enemy) => {
+            if (!enemy || !enemy.active) return;
+            enemy.hp -= 40;
+            this.addHitFx(enemy.x, enemy.y);
+            if (enemy.hp <= 0) toKill.push(enemy);
+          });
+          toKill.forEach((enemy) => this.defeatEnemy(enemy));
+        }
+
+        loadStage(index) {
+          this.currentStageIndex = index;
+          this.stage = STAGES[index];
+          this.stageDefeated = 0;
+          this.stageSpawned = 0;
+          this.spawnQueue = [];
+
+          this.enemies.clear(true, true);
+          this.arrows.clear(true, true);
+
+          this.stage.waves.forEach((w) => {
+            for (let i = 0; i < w.count; i += 1) this.spawnQueue.push(w.type);
+          });
+          Phaser.Utils.Array.Shuffle(this.spawnQueue);
+          this.stageTotal = this.spawnQueue.length;
+
+          for (let i = 0; i < this.stage.simultaneous; i += 1) {
+            this.spawnNextEnemy();
+          }
+          this.refreshStageUi();
+          this.showStageBanner(`${this.stage.name} 開始`);
+        }
+
+        spawnNextEnemy() {
+          if (this.stageSpawned >= this.stageTotal) return;
+          if (this.enemies.countActive(true) >= this.stage.simultaneous) return;
+
+          const type = this.spawnQueue[this.stageSpawned];
+          const def = ENEMY_DATA[type];
+          const x = Phaser.Math.Between(280, this.worldW - 40);
+          const y = Phaser.Math.Between(90, this.worldH - 220);
+
+          const enemy = this.add.circle(x, y, def.radius, def.color, 1).setDepth(5);
+          this.physics.add.existing(enemy);
+          enemy.body.setAllowGravity(false);
+          enemy.body.setCircle(def.radius);
+          enemy.type = type;
+          enemy.hp = def.hp;
+          enemy.baseX = x;
+          enemy.baseY = y;
+          enemy.motionT = Phaser.Math.FloatBetween(0, Math.PI * 2);
+          enemy.moveDirX = Phaser.Math.RND.pick([-1, 1]);
+          enemy.moveDirY = Phaser.Math.RND.pick([-1, 1]);
+          enemy.speed = def.baseSpeed + Phaser.Math.Between(-8, 8);
+          enemy.dashCooldown = Phaser.Math.Between(900, 1700);
+
+          this.enemies.add(enemy);
+          this.stageSpawned += 1;
+          this.refreshStageUi();
+        }
+
+        updateEnemies(delta) {
+          const dt = delta / 1000;
+          this.enemies.children.each((enemy) => {
+            if (!enemy || !enemy.active) return;
+            enemy.motionT += dt;
+
+            if (enemy.type === "Balloon") {
+              enemy.x += enemy.moveDirX * enemy.speed * dt;
+              enemy.y = enemy.baseY + Math.sin(enemy.motionT * 2) * 12;
+            } else if (enemy.type === "Wisp") {
+              enemy.x += enemy.moveDirX * enemy.speed * dt;
+              enemy.y += Math.sin(enemy.motionT * 3.2) * 26 * dt * 8;
+            } else if (enemy.type === "Bat") {
+              enemy.x += enemy.moveDirX * enemy.speed * dt;
+              enemy.y += enemy.moveDirY * (enemy.speed * 0.68) * dt;
+            } else if (enemy.type === "ArmorDrone") {
+              enemy.dashCooldown -= delta;
+              let moveSpeed = enemy.speed;
+              if (enemy.dashCooldown <= 0) {
+                moveSpeed *= 2.2;
+                enemy.dashCooldown = Phaser.Math.Between(850, 1600);
+              }
+              enemy.x += enemy.moveDirX * moveSpeed * dt;
+              enemy.y += Math.sin(enemy.motionT * 2.4) * 18 * dt * 8;
+            }
+
+            const r = enemy.radius || ENEMY_DATA[enemy.type].radius;
+            if (enemy.x < 240 + r) { enemy.x = 240 + r; enemy.moveDirX = 1; }
+            if (enemy.x > this.worldW - 20 - r) { enemy.x = this.worldW - 20 - r; enemy.moveDirX = -1; }
+            if (enemy.y < 70 + r) { enemy.y = 70 + r; enemy.moveDirY = 1; }
+            if (enemy.y > this.worldH - 150 - r) { enemy.y = this.worldH - 150 - r; enemy.moveDirY = -1; }
+          });
+        }
+
+        defeatEnemy(enemy) {
+          if (!enemy.active) return;
+          this.stageDefeated += 1;
+          this.refreshStageUi();
+          const boom = this.add.circle(enemy.x, enemy.y, 16, 0xffffff, 0.9);
+          this.tweens.add({
+            targets: boom,
+            scale: 2.6,
+            alpha: 0,
+            duration: 220,
+            onComplete: () => boom.destroy(),
+          });
+          enemy.destroy();
+
+          this.time.delayedCall(280, () => this.spawnNextEnemy());
+        }
+
+        refreshStageUi() {
+          this.stageText.setText(`${this.stage.name}`);
+          this.remainText.setText(`残り ${this.stageTotal - this.stageDefeated} / ${this.stageTotal}`);
+        }
+
+        checkStageClear() {
+          if (this.stageDefeated < this.stageTotal) return;
+          if (this.enemies.countActive(true) > 0) return;
+          if (this.time.now - this.lastStageClearTime < 800) return;
+          this.lastStageClearTime = this.time.now;
+
+          if (this.currentStageIndex >= STAGES.length - 1) {
+            this.showStageBanner("全ステージクリア!", 1800);
+            return;
+          }
+
+          this.showStageBanner("ステージクリア!", 800);
+          this.time.delayedCall(1200, () => this.loadStage(this.currentStageIndex + 1));
+        }
+
+        showStageBanner(text, hold = 900) {
+          if (this.banner) this.banner.destroy();
+          this.banner = this.add.text(this.worldW / 2, this.worldH * 0.22, text, {
+            fontFamily: "M PLUS Rounded 1c",
+            fontSize: "44px",
+            color: "#ffffff",
+            fontStyle: "800",
+            stroke: "#ff8fc2",
+            strokeThickness: 10,
+          }).setOrigin(0.5).setDepth(30);
+          this.banner.alpha = 0;
+          this.tweens.add({
+            targets: this.banner,
+            alpha: 1,
+            y: this.worldH * 0.2,
+            duration: 220,
+            yoyo: false,
+            onComplete: () => {
+              this.time.delayedCall(hold, () => {
+                this.tweens.add({
+                  targets: this.banner,
+                  alpha: 0,
+                  y: this.worldH * 0.18,
+                  duration: 260,
+                  onComplete: () => this.banner && this.banner.destroy(),
+                });
+              });
+            },
+          });
+        }
+      }
+
+      const config = {
+        type: Phaser.AUTO,
+        parent: "game-root",
+        width: window.innerWidth,
+        height: window.innerHeight,
+        backgroundColor: "#fff0f5",
+        physics: {
+          default: "arcade",
+          arcade: {
+            gravity: { y: 0 },
+            debug: false,
+          },
+        },
+        scale: {
+          mode: Phaser.Scale.RESIZE,
+          autoCenter: Phaser.Scale.CENTER_BOTH,
+        },
+        scene: [MainScene],
+      };
+
+      const game = new Phaser.Game(config);
+      window.addEventListener("resize", () => game.scale.resize(window.innerWidth, window.innerHeight));
+    })();
+  </script>
+</body>
+</html>
