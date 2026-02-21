@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ワイルドゾンビ世界討伐</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg1: #fff0f5;
+      --bg2: #dff7ff;
+      --ink: #653a56;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      background: linear-gradient(180deg, var(--bg1), var(--bg2));
+      font-family: "M PLUS Rounded 1c", sans-serif;
+    }
+    #game-root {
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+    canvas {
+      display: block;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-root"></div>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+  <script>
+    (() => {
+      const COUNTRY_NAMES = [
+        "日本", "韓国", "タイ", "インド", "オーストラリア", "アメリカ", "カナダ", "ブラジル",
+        "アルゼンチン", "イギリス", "フランス", "ドイツ", "イタリア", "エジプト", "ケニア", "南アフリカ"
+      ];
+
+      class ZombieRoundupScene extends Phaser.Scene {
+        constructor() {
+          super("ZombieRoundupScene");
+        }
+
+        create() {
+          this.worldW = this.scale.width;
+          this.worldH = this.scale.height;
+          this.cameras.main.setBackgroundColor("#fff0f5");
+
+          this.pointerTarget = new Phaser.Math.Vector2(this.worldW * 0.5, this.worldH * 0.75);
+          this.isGameOver = false;
+          this.score = 0;
+          this.defeated = 0;
+          this.goal = 60;
+          this.timeLeft = 90;
+          this.spawnIntervalMs = 1100;
+          this.maxWild = 26;
+
+          this.zombies = this.add.group();
+          this.train = [];
+
+          this.drawBackdrop();
+          this.createPlayer();
+          this.createUi();
+          this.createInput();
+          this.startSystems();
+        }
+
+        drawBackdrop() {
+          const sky = this.add.graphics();
+          sky.fillGradientStyle(0xfff0f5, 0xfff0f5, 0xdff7ff, 0xdff7ff, 1);
+          sky.fillRect(0, 0, this.worldW, this.worldH);
+
+          for (let i = 0; i < 7; i += 1) {
+            const x = 50 + i * (this.worldW / 7);
+            const y = 90 + (i % 2) * 18;
+            const cloud = this.add.graphics();
+            cloud.fillStyle(0xffffff, 0.72);
+            cloud.fillCircle(x, y, 18);
+            cloud.fillCircle(x + 22, y + 3, 13);
+            cloud.fillCircle(x - 20, y + 4, 12);
+          }
+
+          const globe = this.add.circle(this.worldW * 0.5, this.worldH * 0.56, this.worldW * 0.34, 0xc7efff, 0.7);
+          globe.setStrokeStyle(6, 0xffffff, 0.85);
+
+          const bands = this.add.graphics();
+          bands.lineStyle(2, 0xffffff, 0.45);
+          for (let i = -2; i <= 2; i += 1) {
+            bands.strokeEllipse(this.worldW * 0.5, this.worldH * 0.56 + i * 20, this.worldW * 0.55, this.worldW * 0.22);
+          }
+        }
+
+        createPlayer() {
+          this.player = this.add.container(this.worldW * 0.5, this.worldH * 0.78);
+          const body = this.add.circle(0, 0, 30, 0xff8ec3);
+          const face = this.add.circle(-6, -5, 17, 0xffd8ea);
+          const eyeL = this.add.circle(-12, -9, 2, 0x653a56);
+          const eyeR = this.add.circle(-3, -9, 2, 0x653a56);
+          const sparkle = this.add.star(20, -22, 5, 6, 11, 0xffffff, 0.95);
+          this.player.add([body, face, eyeL, eyeR, sparkle]);
+          this.playerSpeed = 220;
+        }
+
+        createUi() {
+          const uiStyle = {
+            fontFamily: "M PLUS Rounded 1c",
+            color: "#653a56",
+            fontSize: "26px",
+            fontStyle: "800"
+          };
+          const subStyle = {
+            fontFamily: "M PLUS Rounded 1c",
+            color: "#653a56",
+            fontSize: "21px",
+            fontStyle: "700"
+          };
+
+          this.topPanel = this.add.rectangle(this.worldW * 0.5, 58, this.worldW - 28, 92, 0xffffff, 0.68);
+          this.topPanel.setStrokeStyle(3, 0xffffff, 0.95);
+
+          this.scoreText = this.add.text(24, 25, "", uiStyle);
+          this.goalText = this.add.text(24, 57, "", subStyle);
+          this.timeText = this.add.text(this.worldW - 165, 38, "", uiStyle);
+
+          this.trainText = this.add.text(24, this.worldH - 124, "", subStyle);
+
+          this.burstButton = this.add.container(this.worldW - 112, this.worldH - 72).setDepth(10);
+          const btnBg = this.add.rectangle(0, 0, 188, 72, 0xff8ec3, 1);
+          btnBg.setStrokeStyle(4, 0xffffff, 1);
+          const btnLabel = this.add.text(0, 0, "まとめて討伐!", {
+            fontFamily: "M PLUS Rounded 1c",
+            fontSize: "28px",
+            color: "#ffffff",
+            fontStyle: "800"
+          }).setOrigin(0.5);
+          this.burstButton.add([btnBg, btnLabel]);
+          btnBg.setInteractive({ useHandCursor: true });
+          btnBg.on("pointerdown", () => this.burstDefeat());
+
+          this.centerMessage = this.add.text(this.worldW * 0.5, this.worldH * 0.42, "", {
+            fontFamily: "M PLUS Rounded 1c",
+            fontSize: "46px",
+            color: "#653a56",
+            fontStyle: "800",
+            align: "center",
+            stroke: "#ffffff",
+            strokeThickness: 8
+          }).setOrigin(0.5).setDepth(20);
+
+          this.updateUi();
+        }
+
+        createInput() {
+          this.input.on("pointerdown", (pointer) => {
+            if (pointer.x > this.worldW - 220 && pointer.y > this.worldH - 130) return;
+            this.pointerTarget.set(pointer.x, pointer.y);
+          });
+          this.input.on("pointermove", (pointer) => {
+            if (!pointer.isDown) return;
+            this.pointerTarget.set(pointer.x, pointer.y);
+          });
+        }
+
+        startSystems() {
+          this.time.addEvent({
+            delay: this.spawnIntervalMs,
+            loop: true,
+            callback: () => {
+              if (!this.isGameOver) this.spawnZombie();
+            }
+          });
+
+          this.time.addEvent({
+            delay: 1000,
+            loop: true,
+            callback: () => {
+              if (this.isGameOver) return;
+              this.timeLeft -= 1;
+              if (this.timeLeft <= 0) {
+                this.timeLeft = 0;
+                this.finishGame(this.defeated >= this.goal);
+              }
+              this.updateUi();
+            }
+          });
+        }
+
+        spawnZombie() {
+          const wildCount = this.getWildCount();
+          if (wildCount >= this.maxWild) {
+            this.finishGame(false);
+            return;
+          }
+
+          const side = Phaser.Math.Between(0, 3);
+          let x = 0;
+          let y = 0;
+          if (side === 0) { x = Phaser.Math.Between(20, this.worldW - 20); y = 120; }
+          if (side === 1) { x = this.worldW - 30; y = Phaser.Math.Between(130, this.worldH - 190); }
+          if (side === 2) { x = Phaser.Math.Between(20, this.worldW - 20); y = this.worldH - 180; }
+          if (side === 3) { x = 30; y = Phaser.Math.Between(130, this.worldH - 190); }
+
+          const country = Phaser.Utils.Array.GetRandom(COUNTRY_NAMES);
+          const zombie = this.add.container(x, y);
+          zombie.state = "wild";
+          zombie.followIndex = -1;
+          zombie.country = country;
+          zombie.seed = Math.random() * 1000;
+
+          const body = this.add.circle(0, 0, 18, 0xbce08e);
+          const face = this.add.circle(-4, -3, 11, 0xe9ffca);
+          const eyeL = this.add.circle(-8, -6, 2, 0x42533a);
+          const eyeR = this.add.circle(-2, -6, 2, 0x42533a);
+          const tag = this.add.text(0, -36, country, {
+            fontFamily: "M PLUS Rounded 1c",
+            fontSize: "18px",
+            color: "#4f3a55",
+            fontStyle: "700",
+            backgroundColor: "rgba(255,255,255,0.75)",
+            padding: { x: 6, y: 3 }
+          }).setOrigin(0.5);
+
+          zombie.add([body, face, eyeL, eyeR, tag]);
+          zombie.bodyCircle = body;
+          this.zombies.add(zombie);
+        }
+
+        burstDefeat() {
+          if (this.isGameOver || this.train.length === 0) return;
+          const count = this.train.length;
+          this.score += count * 120;
+          this.defeated += count;
+
+          this.train.forEach((zombie) => {
+            this.playBurst(zombie.x, zombie.y);
+            this.zombies.remove(zombie, true, true);
+          });
+          this.train.length = 0;
+
+          if (this.defeated >= this.goal) {
+            this.finishGame(true);
+          }
+          this.updateUi();
+        }
+
+        playBurst(x, y) {
+          for (let i = 0; i < 10; i += 1) {
+            const puff = this.add.circle(x, y, Phaser.Math.Between(4, 8), 0xfff0fa, 0.95);
+            const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+            const distance = Phaser.Math.Between(30, 78);
+            this.tweens.add({
+              targets: puff,
+              x: x + Math.cos(angle) * distance,
+              y: y + Math.sin(angle) * distance,
+              alpha: 0,
+              duration: 430,
+              ease: "Quad.easeOut",
+              onComplete: () => puff.destroy()
+            });
+          }
+        }
+
+        getWildCount() {
+          let count = 0;
+          this.zombies.children.iterate((zombie) => {
+            if (zombie && zombie.state === "wild") count += 1;
+          });
+          return count;
+        }
+
+        finishGame(isClear) {
+          if (this.isGameOver) return;
+          this.isGameOver = true;
+          this.centerMessage.setText(isClear ? "ミッションクリア!\nゾンビせん滅完了" : "タイムアップ...\nもう一度チャレンジ!");
+        }
+
+        updateUi() {
+          this.scoreText.setText(`スコア ${this.score}`);
+          this.goalText.setText(`討伐 ${this.defeated}/${this.goal} ・ 野生 ${this.getWildCount()}体`);
+          this.timeText.setText(`残り ${this.timeLeft}s`);
+          this.trainText.setText(`保護したゾンビ ${this.train.length}体`);
+        }
+
+        update(_, delta) {
+          if (this.isGameOver) return;
+          this.movePlayer(delta);
+          this.updateZombies(delta);
+          this.collectCheck();
+          this.updateUi();
+        }
+
+        movePlayer(delta) {
+          const dt = delta / 1000;
+          const dx = this.pointerTarget.x - this.player.x;
+          const dy = this.pointerTarget.y - this.player.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 2) return;
+
+          const step = Math.min(this.playerSpeed * dt, dist);
+          this.player.x += (dx / dist) * step;
+          this.player.y += (dy / dist) * step;
+          this.player.x = Phaser.Math.Clamp(this.player.x, 26, this.worldW - 26);
+          this.player.y = Phaser.Math.Clamp(this.player.y, 130, this.worldH - 150);
+        }
+
+        updateZombies(delta) {
+          const dt = delta / 1000;
+          let followCounter = 0;
+          this.zombies.children.iterate((zombie) => {
+            if (!zombie) return;
+            if (zombie.state === "wild") {
+              const wobble = Math.sin((this.time.now * 0.003) + zombie.seed) * 30;
+              const tx = this.player.x + wobble;
+              const ty = this.player.y - 40;
+              const dx = tx - zombie.x;
+              const dy = ty - zombie.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const speed = 55 + (this.train.length * 1.5);
+              zombie.x += (dx / len) * speed * dt;
+              zombie.y += (dy / len) * speed * dt;
+            } else {
+              followCounter += 1;
+              const gap = 34 + Math.min(42, followCounter * 1.6);
+              const targetX = this.player.x - followCounter * 22;
+              const targetY = this.player.y + Math.sin((this.time.now * 0.005) + followCounter) * 8 + gap * 0.2;
+              zombie.x += (targetX - zombie.x) * Math.min(1, 8 * dt);
+              zombie.y += (targetY - zombie.y) * Math.min(1, 8 * dt);
+            }
+          });
+        }
+
+        collectCheck() {
+          this.zombies.children.iterate((zombie) => {
+            if (!zombie || zombie.state !== "wild") return;
+            const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, zombie.x, zombie.y);
+            if (dist > 42) return;
+            zombie.state = "captured";
+            zombie.bodyCircle.setFillStyle(0x8fd4ff, 1);
+            zombie.followIndex = this.train.length;
+            this.train.push(zombie);
+          });
+        }
+      }
+
+      const game = new Phaser.Game({
+        type: Phaser.AUTO,
+        parent: "game-root",
+        backgroundColor: "#fff0f5",
+        scale: {
+          mode: Phaser.Scale.FIT,
+          autoCenter: Phaser.Scale.CENTER_BOTH,
+          width: 540,
+          height: 960
+        },
+        scene: [ZombieRoundupScene]
+      });
+
+      window.addEventListener("resize", () => game.scale.refresh());
+    })();
+  </script>
+</body>
+</html>
