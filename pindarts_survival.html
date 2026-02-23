@@ -74,7 +74,7 @@
             player: {
                 maxPower: 100,
                 maxHp: 100,
-                powerDepletionRate: 35, // 少し早めに設定
+                powerDepletionRate: 0, // 一旦パワーは減らさない
                 size: 16
             },
             game: {
@@ -174,6 +174,7 @@
                     hp: CONFIG.player.maxHp,
                     isFlying: false,
                     isCharging: false,
+                    isFalling: false,
                     isDead: false,
                     swipeStart: new Phaser.Math.Vector2(),
                     score: 0,
@@ -314,6 +315,7 @@
                 this.physics.world.enable(target);
                 target.body.setImmovable(true);
                 target.body.setAllowGravity(false);
+                target.physicsBody = physicsBody;
 
                 // カスタムプロパティ
                 physicsBody.parentContainer = target;
@@ -352,6 +354,7 @@
                 this.physics.world.enable(obstacle);
                 obstacle.body.setImmovable(true);
                 obstacle.body.setAllowGravity(false);
+                obstacle.physicsBody = physicsBody;
 
                 physicsBody.parentContainer = obstacle;
 
@@ -395,7 +398,7 @@
 
                 this.updateBars();
 
-                this.instructionText = this.add.text(CONFIG.width / 2, CONFIG.height * 0.6, 'スワップして発射！\n的に当ててHP回復\n障害物は避けて！', {
+                this.instructionText = this.add.text(CONFIG.width / 2, CONFIG.height * 0.6, 'スワイプして発射！\n的に当ててHP回復\n障害物は避けて！', {
                     fontFamily: '"M PLUS Rounded 1c"', fontSize: '18px', color: '#4B0082', align: 'center', fontWeight: 700
                 }).setOrigin(0.5, 0.5);
             }
@@ -649,8 +652,8 @@
                         obj.y += diff;
                         // 画面外に消えたら削除
                         if (obj.y > CONFIG.height + 100) {
-                            if (obj.list && obj.list[1] && obj.list[1].parentContainer) {
-                                obj.list[1].destroy();
+                            if (obj.physicsBody && obj.physicsBody.active) {
+                                obj.physicsBody.destroy();
                             }
                             obj.destroy();
                         }
@@ -670,7 +673,8 @@
 
                 // ====== 画面外落下判定 ======
                 // カメラから見た描画位置（ワールド座標のY）で判定する
-                if (this.player.y > this.cameras.main.scrollY + CONFIG.height + CONFIG.player.size * 2) {
+                const bottomY = CONFIG.height - CONFIG.player.size * 0.6;
+                if (this.gameState.isFalling && this.player.y >= bottomY) {
                     this.gameOver();
                 }
             }
@@ -697,12 +701,15 @@
             }
 
             triggerFall() {
+                if (this.gameState.isFalling || this.gameState.isDead) return;
                 this.gameState.isFlying = false;
+                this.gameState.isFalling = true;
                 const body = this.player.body;
                 body.setAllowGravity(true);
                 body.setGravityY(CONFIG.physics.gravity);
                 body.setBounce(0, 0); // バウンドをなくす
                 body.setVelocityX(0); // 左右の動きを止める
+                body.setCollideWorldBounds(false); // 最下部到達でゲームオーバー判定させる
                 this.player.setAlpha(0.6);
             }
 
@@ -728,21 +735,28 @@
                     fontFamily: '"M PLUS Rounded 1c"', fontSize: '28px', color: '#FFF', fontWeight: 700
                 }).setOrigin(0.5, 0.5).setDepth(201);
 
-                this.time.delayedCall(1500, () => {
-                    const btnBg = this.add.graphics();
-                    btnBg.fillStyle(0xFF69B4, 1);
-                    btnBg.fillRoundedRect(CONFIG.width / 2 - 90, CONFIG.height / 2 + 70, 180, 50, 25);
-                    btnBg.setDepth(201);
+                const btnBg = this.add.graphics();
+                btnBg.fillStyle(0xFF69B4, 1);
+                btnBg.fillRoundedRect(CONFIG.width / 2 - 90, CONFIG.height / 2 + 70, 180, 50, 25);
+                btnBg.setDepth(201);
 
-                    const btnText = this.add.text(CONFIG.width / 2, CONFIG.height / 2 + 95, 'もういちど遊ぶ', {
-                        fontFamily: '"M PLUS Rounded 1c"', fontSize: '20px', color: '#FFF', fontWeight: 700
-                    }).setOrigin(0.5, 0.5).setDepth(202);
+                const btnText = this.add.text(CONFIG.width / 2, CONFIG.height / 2 + 95, 'もういちど遊ぶ', {
+                    fontFamily: '"M PLUS Rounded 1c"', fontSize: '20px', color: '#FFF', fontWeight: 700
+                }).setOrigin(0.5, 0.5).setDepth(202);
 
-                    const btnZone = this.add.zone(CONFIG.width / 2, CONFIG.height / 2 + 95, 180, 50).setInteractive();
-                    btnZone.setDepth(203);
-                    btnZone.on('pointerdown', () => {
-                        this.scene.restart();
-                    });
+                this.tweens.add({
+                    targets: btnText,
+                    scaleX: 1.05,
+                    scaleY: 1.05,
+                    duration: 700,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                const btnZone = this.add.zone(CONFIG.width / 2, CONFIG.height / 2 + 95, 180, 50).setInteractive();
+                btnZone.setDepth(203);
+                btnZone.on('pointerdown', () => {
+                    this.scene.restart();
                 });
             }
         }
