@@ -47,12 +47,18 @@ const ARROW_SPEED_BASE = 800;   // 発射速度基準
 const ARROW_MAX_DRAG  = 120;    // 引っ張りの最大距離（px）
 const ARROW_RANGE_MAX = 1200;   // 最大飛距離
 const ARROW_RANGE_EXP = 1.5;    // 弱い引きで飛距離を短くする補正
+const SPECIAL_ARROW_INTERVAL = 3; // 特殊矢の出現間隔
 const FALL_GAMEOVER_DISTANCE = 220; // 落下開始後に許容する戻り距離
 const BALLOON_MOVE_SPEED_MIN = 0.0012; // 移動風船の最小速度
 const BALLOON_MOVE_SPEED_MAX = 0.0022; // 移動風船の最大速度
 const WIND_STRENGTH_WEAK = 0.16;  // 風の弱補正
 const WIND_STRENGTH_MID = 0.24;   // 風の中補正
 const WIND_STRENGTH_STRONG = 0.34; // 風の強補正
+const WIND_ZONE_LAYOUT = [
+  { xRate: 0.28, yOffset: -220, dirX: 1, strength: WIND_STRENGTH_WEAK, key: 'wind_mark_weak', label: '右風・弱' },
+  { xRate: 0.72, yOffset: -520, dirX: -1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '左風・中' },
+  { xRate: 0.32, yOffset: -900, dirX: 1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '右風・強' }
+];
 const INITIAL_ARROWS  = 5;      // 初期矢の本数
 const WORLD_HEIGHT    = 6000;   // スクロール可能な世界の高さ
 const SHOW_DEBUG_HITBOX = false; // 当たり判定の可視化
@@ -70,6 +76,7 @@ class BootScene extends Phaser.Scene {
     this.createWoodTexture();
     this.createWoodPadTexture();
     this.createBalloonTexture();
+    this.createWarpBalloonTexture();
     this.createWindTexture();
     this.createWallTexture();
   }
@@ -142,6 +149,20 @@ class BootScene extends Phaser.Scene {
       g.generateTexture(`balloon_${i}`, r * 2, r * 2 + 20);
       g.destroy();
     });
+  }
+
+  createWarpBalloonTexture() {
+    const g = this.make.graphics({ x: 0, y: 0, add: false });
+    const r = 36;
+    g.fillStyle(0x8c9eff, 0.92);
+    g.fillCircle(r, r, r);
+    g.lineStyle(4, 0xffffff, 0.9);
+    g.strokeCircle(r, r, 22);
+    g.lineStyle(3, 0x5c6bc0, 0.75);
+    g.strokeCircle(r, r, 30);
+    // 紐なしなので正円サイズで生成（中心座標ズレを防ぐ）
+    g.generateTexture('balloon_warp', r * 2, r * 2);
+    g.destroy();
   }
 
   createWindTexture() {
@@ -224,6 +245,19 @@ class GameScene extends Phaser.Scene {
     this.flightDistanceLeft = 0;      // 残り飛距離
     this.fallStartY = 0;              // 落下開始時のY
     this.arrowColliders = [];         // 矢に紐づく衝突判定
+    this.arrowTypeText = null;        // シーン再開始時の破棄済み参照をクリア
+    this.debugToggleBtn = null;
+    this.shotsFired = 0;              // 発射済み本数
+    this.currentArrowType = 'normal'; // 現在の矢タイプ
+    this.currentArrowConfig = null;
+    this.lastWarpAt = -99999;         // 最終ワープ時刻(ms)
+    this.warpIgnorePairId = null;     // 連続ワープ抑止用ペアID
+    this.warpIgnoreUntil = 0;         // 連続ワープ抑止終了時刻(ms)
+    this.warpStabilizeUntil = 0;      // ワープ後の挙動安定化
+    this.arrowTypeConfigMap = {
+      normal: { label: 'ノーマル', speedMul: 1.0, rangeMul: 1.0, windMul: 1.0, uiColor: '#FF6B9D' },
+      boost:  { label: 'ブースト', speedMul: 1.22, rangeMul: 1.18, windMul: 0.9, uiColor: '#FF8F00' }
+    };
     const savedDebug = localStorage.getItem(DEBUG_HITBOX_STORAGE_KEY);
     this.showDebugHitbox = savedDebug === null ? SHOW_DEBUG_HITBOX : savedDebug === '1';
 
@@ -235,17 +269,18 @@ class GameScene extends Phaser.Scene {
     this.woodColliderGroup = this.physics.add.staticGroup();
     this.createInitialWoods();
 
+    // ---- 風ギミック ----
+    this.windGroup = this.physics.add.staticGroup();
+    this.createWinds();
+
     // ---- 風船生成 ----
     this.balloonGroup = this.physics.add.group({
       allowGravity: false,
       immovable: true
     });
     this.movingBalloons = [];
+    this.warpPairs = [];
     this.createBalloons();
-
-    // ---- 風ギミック ----
-    this.windGroup = this.physics.add.staticGroup();
-    this.createWinds();
 
     // ---- 矢の生成（最初の発射台から） ----
     const firstWood = this.woodGroup.getChildren()[0];
@@ -343,55 +378,79 @@ class GameScene extends Phaser.Scene {
 
   // ---- 風船配置 ----
   createBalloons() {
-    // Phase 1: コインライン状に配置（プレイヤーの通り道がわかる配置）
-    const startY = GAME_H - 350;
-    const routes = [
-      // ルート1: 左→右へ上昇
-      [
-        { x: 120, y: startY },
-        { x: 170, y: startY - 60 },
-        { x: 220, y: startY - 120 },
-        { x: 270, y: startY - 180 },
-      ],
-      // ルート2: 右側の風船群
-      [
-        { x: 260, y: startY - 320 },
-        { x: 230, y: startY - 380 },
-        { x: 200, y: startY - 440 },
-      ],
-      // ルート3
-      [
-        { x: 130, y: startY - 580 },
-        { x: 160, y: startY - 640 },
-        { x: 200, y: startY - 700 },
-        { x: 240, y: startY - 760 },
-        { x: 270, y: startY - 820 },
-      ],
+    // Phase 2: コンボ導線が見えるよう、木の近くに連続ルートを形成
+    const points = [10, 20, 30, 50];
+    const routeDefs = [
+      // 開始直後: 中央→左上へ、初心者向けに密集
+      {
+        startX: 190,
+        startY: GAME_H - 270,
+        stepX: -20,
+        stepY: -56,
+        count: 5,
+        movePattern: ['fixed', 'fixed', 'updown', 'fixed', 'leftright']
+      },
+      // 1つ目の木付近: 左下→右上の回収ライン
+      {
+        startX: 120,
+        startY: GAME_H - 520,
+        stepX: 30,
+        stepY: -52,
+        count: 6,
+        movePattern: ['fixed', 'updown', 'fixed', 'leftright', 'fixed', 'updown']
+      },
+      // 風ゾーン(中段)付近: 右寄りに誘導
+      {
+        startX: 250,
+        startY: GAME_H - 770,
+        stepX: -22,
+        stepY: -52,
+        count: 5,
+        movePattern: ['leftright', 'fixed', 'updown', 'fixed', 'leftright']
+      },
+      // 上段: ジグザグで連続ヒットしやすく
+      {
+        startX: 130,
+        startY: GAME_H - 1020,
+        stepX: 34,
+        stepY: -50,
+        count: 7,
+        movePattern: ['fixed', 'updown', 'fixed', 'leftright', 'fixed', 'updown', 'fixed']
+      }
     ];
 
-    const points = [10, 20, 30, 50];
-    const movePattern = ['fixed', 'updown', 'fixed', 'leftright'];
-    routes.forEach(route => {
-      route.forEach((pos, i) => {
-        this.addBalloon(
-          pos.x,
-          pos.y,
-          points[i % points.length],
-          movePattern[(i + Phaser.Math.Between(0, 1)) % movePattern.length]
-        );
-      });
+    routeDefs.forEach(route => {
+      for (let i = 0; i < route.count; i++) {
+        const x = Phaser.Math.Clamp(route.startX + route.stepX * i, 70, GAME_W - 70);
+        const y = route.startY + route.stepY * i;
+        this.addBalloon(x, y, points[i % points.length], route.movePattern[i % route.movePattern.length]);
+      }
     });
+
+    // ワープ風船は一旦無効化（挙動調査まで保留）
+    // this.addWarpPair('A', GAME_W * 0.24, GAME_H - 300, GAME_W * 0.76, GAME_H - 460);
+    // this.drawWarpGuides();
   }
 
-  addBalloon(x, y, point, moveType = 'fixed') {
+  addBalloon(x, y, point, moveType = 'fixed', options = {}) {
+    const isWarp = options.kind === 'warp';
     const colorIdx = Phaser.Math.Between(0, 4);
-    const balloon = this.balloonGroup.create(x, y, `balloon_${colorIdx}`);
+    const texture = isWarp ? 'balloon_warp' : `balloon_${colorIdx}`;
+    const textureKey = this.textures.exists(texture) ? texture : 'balloon_0';
+    const balloon = this.balloonGroup.create(x, y, textureKey);
     balloon.setImmovable(true);
     balloon.body.setAllowGravity(false);
     // 風船本体のみを判定にする（紐は除外）
-    balloon.body.setSize(52, 52);
-    balloon.body.setOffset(10, 10);
-    balloon.scoreValue = point;
+    if (isWarp) {
+      balloon.body.setSize(56, 56);
+      balloon.body.setOffset(8, 8);
+    } else {
+      balloon.body.setSize(52, 52);
+      balloon.body.setOffset(10, 10);
+    }
+    balloon.scoreValue = isWarp ? 0 : point;
+    balloon.kind = isWarp ? 'warp' : 'normal';
+    balloon.warpPairId = options.warpPairId || null;
     balloon.moveType = moveType;
     balloon.baseX = x;
     balloon.baseY = y;
@@ -407,12 +466,12 @@ class GameScene extends Phaser.Scene {
     }
 
     // スコア数値テキスト
-    const text = this.add.text(x, y - 14, `+${point}`, {
+    const text = this.add.text(x, y - 14, isWarp ? '' : `+${point}`, {
       fontFamily: "'M PLUS Rounded 1c'",
       fontSize: '16px',
       fontStyle: 'bold',
       color: '#FFFFFF',
-      stroke: '#FF6B9D',
+      stroke: isWarp ? '#5C6BC0' : '#FF6B9D',
       strokeThickness: 3
     }).setOrigin(0.5);
     balloon.scoreText = text;
@@ -420,15 +479,119 @@ class GameScene extends Phaser.Scene {
     return balloon;
   }
 
+  addWarpPair(id, x1, y1, x2, y2) {
+    const p1 = this.adjustWarpPosAwayFromWind(x1, y1);
+    const p2 = this.adjustWarpPosAwayFromWind(x2, y2);
+    const b1 = this.addBalloon(p1.x, p1.y, 0, 'fixed', { kind: 'warp', warpPairId: id });
+    const b2 = this.addBalloon(p2.x, p2.y, 0, 'fixed', { kind: 'warp', warpPairId: id });
+
+    const pairColor = 0x5c6bc0;
+    const t1 = this.add.text(b1.x, b1.y - 44, `${id}⇄`, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '14px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      stroke: '#5C6BC0',
+      strokeThickness: 4
+    }).setOrigin(0.5);
+    const t2 = this.add.text(b2.x, b2.y - 44, `${id}⇄`, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '14px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      stroke: '#5C6BC0',
+      strokeThickness: 4
+    }).setOrigin(0.5);
+    b1.scoreText = t1;
+    b2.scoreText = t2;
+
+    this.warpPairs.push({ id, a: b1, b: b2, color: pairColor });
+  }
+
+  adjustWarpPosAwayFromWind(x, y) {
+    let nx = x;
+    let ny = y;
+    for (let i = 0; i < WIND_ZONE_LAYOUT.length; i++) {
+      const wz = WIND_ZONE_LAYOUT[i];
+      const wx = GAME_W * wz.xRate;
+      const wy = GAME_H - 420 + wz.yOffset;
+      const dx = nx - wx;
+      const dy = ny - wy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 130) {
+        const push = 130 - dist;
+        ny += push + 20;
+        nx = Phaser.Math.Clamp(nx + (dx < 0 ? -18 : 18), 70, GAME_W - 70);
+      }
+    }
+    return { x: nx, y: ny };
+  }
+
+  drawWarpGuides() {
+    if (!this.warpPairs || this.warpPairs.length === 0) return;
+    if (this.warpGuideGraphics) {
+      this.warpGuideGraphics.clear();
+    } else {
+      this.warpGuideGraphics = this.add.graphics().setDepth(14);
+    }
+    this.warpPairs.forEach(pair => {
+      if (!pair.a.active || !pair.b.active) return;
+      const ax = pair.a.x, ay = pair.a.y;
+      const bx = pair.b.x, by = pair.b.y;
+      const angleAB = Math.atan2(by - ay, bx - ax);
+      const angleBA = Math.atan2(ay - by, ax - bx);
+
+      // 接続ガイド本線
+      this.warpGuideGraphics.lineStyle(3, pair.color, 0.55);
+      this.warpGuideGraphics.beginPath();
+      this.warpGuideGraphics.moveTo(ax, ay);
+      this.warpGuideGraphics.lineTo(bx, by);
+      this.warpGuideGraphics.strokePath();
+
+      // 破線ドット
+      const steps = 12;
+      this.warpGuideGraphics.fillStyle(pair.color, 0.65);
+      for (let i = 1; i < steps; i++) {
+        const t = i / steps;
+        this.warpGuideGraphics.fillCircle(
+          Phaser.Math.Linear(ax, bx, t),
+          Phaser.Math.Linear(ay, by, t),
+          3.5
+        );
+      }
+
+      // 行き先リング
+      this.warpGuideGraphics.lineStyle(3, pair.color, 0.85);
+      this.warpGuideGraphics.strokeCircle(ax, ay, 30);
+      this.warpGuideGraphics.strokeCircle(bx, by, 30);
+
+      // 双方向矢印ヘッド
+      const headLen = 12;
+      const wing = Math.PI / 7;
+      const drawHead = (tx, ty, angle) => {
+        this.warpGuideGraphics.beginPath();
+        this.warpGuideGraphics.moveTo(tx, ty);
+        this.warpGuideGraphics.lineTo(
+          tx - Math.cos(angle - wing) * headLen,
+          ty - Math.sin(angle - wing) * headLen
+        );
+        this.warpGuideGraphics.moveTo(tx, ty);
+        this.warpGuideGraphics.lineTo(
+          tx - Math.cos(angle + wing) * headLen,
+          ty - Math.sin(angle + wing) * headLen
+        );
+        this.warpGuideGraphics.strokePath();
+      };
+      drawHead(bx, by, angleAB);
+      drawHead(ax, ay, angleBA);
+    });
+  }
+
   createWinds() {
     const startY = GAME_H - 420;
-    const winds = [
-      { x: GAME_W * 0.28, y: startY - 220, dirX: 1, strength: WIND_STRENGTH_WEAK, key: 'wind_mark_weak', label: '右風・弱' },
-      { x: GAME_W * 0.72, y: startY - 520, dirX: -1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '左風・中' },
-      { x: GAME_W * 0.32, y: startY - 900, dirX: 1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '右風・強' },
-    ];
-    winds.forEach(w => {
-      const zone = this.windGroup.create(w.x, w.y, w.key);
+    WIND_ZONE_LAYOUT.forEach(w => {
+      const key = this.textures.exists(w.key) ? w.key : 'wind_mark_weak';
+      const zone = this.windGroup.create(GAME_W * w.xRate, startY + w.yOffset, key);
       zone.setImmovable(true);
       zone.setScale(1.0, 1.0);
       if (w.dirX < 0) zone.setFlipX(true);
@@ -436,7 +599,7 @@ class GameScene extends Phaser.Scene {
       zone.windDirX = w.dirX;
       zone.windStrength = w.strength;
 
-      const tag = this.add.text(w.x, w.y - 40, w.label, {
+      const tag = this.add.text(GAME_W * w.xRate, startY + w.yOffset - 40, w.label, {
         fontFamily: "'M PLUS Rounded 1c'",
         fontSize: '14px',
         fontStyle: 'bold',
@@ -474,6 +637,9 @@ class GameScene extends Phaser.Scene {
     this.arrow.body.setSize(20, 10);
     // 原点=先端(this.arrow.x, this.arrow.y)に当たり判定中心を合わせる
     this.arrow.body.setOffset(50, 1);
+    this.currentArrowType = this.getNextArrowType();
+    this.currentArrowConfig = this.arrowTypeConfigMap[this.currentArrowType] || this.arrowTypeConfigMap.normal;
+    this.updateArrowTypeUI();
 
     // カメラをリフレッシュ
     this.cameras.main.startFollow(this.arrow, true, 0.08, 0.08);
@@ -607,11 +773,13 @@ class GameScene extends Phaser.Scene {
     const power  = clampedDist / ARROW_MAX_DRAG;
     const angle  = Math.atan2(dy, dx); // 引っ張り逆方向
 
-    const vx = Math.cos(angle) * ARROW_SPEED_BASE * power;
-    const vy = Math.sin(angle) * ARROW_SPEED_BASE * power;
+    const speedMul = this.currentArrowConfig ? this.currentArrowConfig.speedMul : 1;
+    const rangeMul = this.currentArrowConfig ? this.currentArrowConfig.rangeMul : 1;
+    const vx = Math.cos(angle) * ARROW_SPEED_BASE * power * speedMul;
+    const vy = Math.sin(angle) * ARROW_SPEED_BASE * power * speedMul;
 
     const rangePower = Math.pow(power, ARROW_RANGE_EXP);
-    this.flightDistanceLeft = Phaser.Math.Linear(0, ARROW_RANGE_MAX, rangePower);
+    this.flightDistanceLeft = Phaser.Math.Linear(0, ARROW_RANGE_MAX * rangeMul, rangePower);
     this.isFalling = false;
     this.arrow.body.setAllowGravity(false);
     this.arrow.body.setVelocity(vx, vy);
@@ -619,6 +787,7 @@ class GameScene extends Phaser.Scene {
 
     this.isFlying   = true;
     this.isDragging = false;
+    this.shotsFired++;
   }
 
   // ---- 壁反射 ----
@@ -633,6 +802,7 @@ class GameScene extends Phaser.Scene {
 
   applyWind(windZone) {
     if (!this.arrow || !this.isFlying || !this.arrow.body) return;
+    if (this.time.now < this.warpStabilizeUntil) return;
     const dirX = windZone.windDirX || 1;
     const strength = windZone.windStrength || WIND_STRENGTH_WEAK;
 
@@ -640,14 +810,21 @@ class GameScene extends Phaser.Scene {
     const vy = this.arrow.body.velocity.y;
     const speed = Math.max(260, Math.sqrt(vx * vx + vy * vy));
     const targetVx = dirX * speed;
-    const nextVx = Phaser.Math.Linear(vx, targetVx, strength);
-    const nextVy = vy * (1 - strength * 0.35);
+    const windMul = this.currentArrowConfig ? this.currentArrowConfig.windMul : 1;
+    const eff = strength * windMul;
+    const nextVx = Phaser.Math.Linear(vx, targetVx, eff);
+    const nextVy = vy * (1 - eff * 0.35);
 
     this.arrow.body.setVelocity(nextVx, nextVy);
   }
 
   // ---- 風船ヒット ----
   hitBalloon(balloon) {
+    if (balloon.kind === 'warp') {
+      this.activateWarp(balloon);
+      return;
+    }
+
     // スコア加算
     this.score += balloon.scoreValue;
     this.updateScoreUI();
@@ -682,6 +859,46 @@ class GameScene extends Phaser.Scene {
       alpha: 0,
       duration: 600,
       onComplete: () => popText.destroy()
+    });
+  }
+
+  activateWarp(balloon) {
+    if (!this.arrow || !this.isFlying || !balloon.warpPairId) return;
+    if (this.time.now - this.lastWarpAt < 260) return;
+    if (this.time.now < this.warpIgnoreUntil && this.warpIgnorePairId === balloon.warpPairId) return;
+
+    const pair = this.balloonGroup.getChildren().filter(b =>
+      b.active && b.kind === 'warp' && b.warpPairId === balloon.warpPairId && b !== balloon
+    );
+    if (pair.length === 0) return;
+    const target = pair[0];
+
+    this.lastWarpAt = this.time.now;
+    this.warpIgnorePairId = balloon.warpPairId;
+    this.warpIgnoreUntil = this.time.now + 520;
+    this.warpStabilizeUntil = this.time.now + 120;
+
+    // ワープ先の円の中央から出現
+    this.arrow.setPosition(target.x, target.y);
+    this.arrow.body.updateFromGameObject();
+
+    // ワープ直後のスクロール違和感を減らすため、追従を一瞬だけスナップ
+    const cam = this.cameras.main;
+    cam.setLerp(1, 1);
+    this.time.delayedCall(34, () => {
+      if (!this.sys || !this.sys.isActive()) return;
+      if (!this.cameras || !this.cameras.main) return;
+      cam.setLerp(0.08, 0.08);
+    });
+
+    const flash = this.add.circle(target.x, target.y, 18, 0x8c9eff, 0.5).setDepth(25);
+    this.tweens.add({
+      targets: flash,
+      scaleX: 2.3,
+      scaleY: 2.3,
+      alpha: 0,
+      duration: 220,
+      onComplete: () => flash.destroy()
     });
   }
 
@@ -729,6 +946,17 @@ class GameScene extends Phaser.Scene {
     this.arrowIcons = [];
     this.arrowUIContainer = this.add.container(0, GAME_H - 50).setDepth(100).setScrollFactor(0);
     this.rebuildArrowUI();
+
+    // 矢タイプ表示（特殊矢の土台）
+    this.arrowTypeText = this.add.text(16, 62, '矢タイプ: ノーマル', {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '16px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      backgroundColor: '#FF6B9D',
+      padding: { x: 12, y: 7 }
+    }).setOrigin(0, 0).setDepth(110).setScrollFactor(0);
+    this.updateArrowTypeUI();
   }
 
   updateScoreUI() {
@@ -752,6 +980,18 @@ class GameScene extends Phaser.Scene {
     this.rebuildArrowUI();
   }
 
+  getNextArrowType() {
+    if ((this.shotsFired + 1) % SPECIAL_ARROW_INTERVAL === 0) return 'boost';
+    return 'normal';
+  }
+
+  updateArrowTypeUI() {
+    if (!this.arrowTypeText || !this.currentArrowConfig) return;
+    if (!this.arrowTypeText.active || !this.arrowTypeText.scene) return;
+    this.arrowTypeText.setText(`矢タイプ: ${this.currentArrowConfig.label}`);
+    this.arrowTypeText.setBackgroundColor(this.currentArrowConfig.uiColor);
+  }
+
   createDebugToggleUI() {
     const label = this.showDebugHitbox ? '判定: ON' : '判定: OFF';
     const bg = this.showDebugHitbox ? '#00C853' : '#B0BEC5';
@@ -767,7 +1007,7 @@ class GameScene extends Phaser.Scene {
     this.debugToggleBtn.on('pointerdown', () => {
       this.showDebugHitbox = !this.showDebugHitbox;
       this.debugToggleBtn.setText(this.showDebugHitbox ? '判定: ON' : '判定: OFF');
-      this.debugToggleBtn.setStyle({ backgroundColor: this.showDebugHitbox ? '#00C853' : '#B0BEC5' });
+      this.debugToggleBtn.setBackgroundColor(this.showDebugHitbox ? '#00C853' : '#B0BEC5');
       localStorage.setItem(DEBUG_HITBOX_STORAGE_KEY, this.showDebugHitbox ? '1' : '0');
       if (!this.showDebugHitbox) this.hitboxGraphics.clear();
     });
@@ -917,6 +1157,8 @@ class GameOverScene extends Phaser.Scene {
   }
 
   create() {
+    this.input.enabled = true;
+
     // ハイスコア保存
     const best = parseInt(localStorage.getItem('arrow_balloon_best') || '0');
     if (this.finalScore > best) {
@@ -951,22 +1193,29 @@ class GameOverScene extends Phaser.Scene {
       color: '#FFB7C5'
     }).setOrigin(0.5);
 
-    // リトライボタン
+    // リトライボタン（当たり判定を広く確保）
+    const btnBg = this.add.rectangle(GAME_W / 2, GAME_H / 2 + 100, 220, 68, 0xFF6B9D, 1)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
     const btn = this.add.text(GAME_W / 2, GAME_H / 2 + 100, 'もう一度 🏹', {
       fontFamily: "'M PLUS Rounded 1c'",
       fontSize: '28px',
       fontStyle: 'bold',
       color: '#FFFFFF',
-      backgroundColor: '#FF6B9D',
-      padding: { x: 30, y: 14 }
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      padding: { x: 8, y: 4 }
+    }).setOrigin(0.5);
 
-    btn.on('pointerdown', () => {
+    let isRestarting = false;
+    const restartGame = () => {
+      if (isRestarting) return;
+      isRestarting = true;
       this.scene.start('Game');
-    });
+    };
 
-    btn.on('pointerover',  () => btn.setStyle({ backgroundColor: '#FF85B3' }));
-    btn.on('pointerout',   () => btn.setStyle({ backgroundColor: '#FF6B9D' }));
+    btnBg.on('pointerdown', restartGame);
+    btnBg.on('pointerup', restartGame);
+    btnBg.on('pointerover', () => btnBg.setFillStyle(0xFF85B3, 1));
+    btnBg.on('pointerout', () => btnBg.setFillStyle(0xFF6B9D, 1));
   }
 }
 
