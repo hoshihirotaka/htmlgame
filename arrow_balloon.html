@@ -54,10 +54,21 @@ const BALLOON_MOVE_SPEED_MAX = 0.0022; // 移動風船の最大速度
 const WIND_STRENGTH_WEAK = 0.16;  // 風の弱補正
 const WIND_STRENGTH_MID = 0.24;   // 風の中補正
 const WIND_STRENGTH_STRONG = 0.34; // 風の強補正
-const WIND_ZONE_LAYOUT = [
+const WIND_ZONE_LAYOUT_STAGE1 = [
   { xRate: 0.28, yOffset: -220, dirX: 1, strength: WIND_STRENGTH_WEAK, key: 'wind_mark_weak', label: '右風・弱' },
   { xRate: 0.72, yOffset: -520, dirX: -1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '左風・中' },
   { xRate: 0.32, yOffset: -900, dirX: 1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '右風・強' }
+];
+const WIND_ZONE_LAYOUT_STAGE2 = [
+  { xRate: 0.22, yOffset: -260, dirX: 1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '右風・中' },
+  { xRate: 0.78, yOffset: -620, dirX: -1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '左風・強' },
+  { xRate: 0.48, yOffset: -980, dirX: 1, strength: WIND_STRENGTH_WEAK, key: 'wind_mark_weak', label: '右風・弱' }
+];
+const WIND_ZONE_LAYOUT_STAGE3 = [
+  { xRate: 0.18, yOffset: -280, dirX: 1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '右風・強' },
+  { xRate: 0.82, yOffset: -540, dirX: -1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '左風・強' },
+  { xRate: 0.30, yOffset: -860, dirX: 1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '右風・中' },
+  { xRate: 0.70, yOffset: -1180, dirX: -1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '左風・中' }
 ];
 const STAGE_COUNT = 3;
 const STAGE_CONFIGS = [
@@ -295,6 +306,7 @@ class GameScene extends Phaser.Scene {
     this.woodSpawnIndex = 0;          // 木バリエーションの固定シーケンス用
     this.arrowTypeText = null;        // シーン再開始時の破棄済み参照をクリア
     this.debugToggleBtn = null;
+    this.debugNextStageBtn = null;
     this.debugPanelText = null;
     this.nextWoodId = 1;
     this.nextBalloonId = 1;
@@ -389,6 +401,15 @@ class GameScene extends Phaser.Scene {
 
   // ---- 木オブジェクト初期配置 ----
   createInitialWoods() {
+    if (this.stageIndex === 2) {
+      this.createStage2Woods();
+      return;
+    }
+    if (this.stageIndex === 3) {
+      this.createStage3Woods();
+      return;
+    }
+
     const startY = GAME_H - 100;
     const stageDepth = STAGE_CONFIGS[this.stageIndex - 1]?.depth || STAGE_CONFIGS[0].depth;
     const topLimit = this.stageIndex === 1
@@ -436,6 +457,55 @@ class GameScene extends Phaser.Scene {
     this.goalWood = last ? last.wood : null;
   }
 
+  createStage2Woods() {
+    const startY = GAME_H - 100;
+    const topLimit = startY - (STAGE_CONFIGS[1]?.depth || 5200);
+    this.woodPath = [];
+    const addPathWood = (x, y, variant = null) => {
+      if (y < topLimit) return;
+      const clampedX = Phaser.Math.Clamp(x, 66, GAME_W - 66);
+      const wood = this.addWood(clampedX, y, variant);
+      this.woodPath.push({ x: clampedX, y, wood });
+    };
+    addPathWood(GAME_W / 2, startY, { sx: 1.0, sy: 1.0 });
+
+    let y = startY - 250;
+    let side = -1;
+    while (y > topLimit) {
+      const x1 = GAME_W * (side < 0 ? 0.24 : 0.76);
+      const x2 = GAME_W * (side < 0 ? 0.62 : 0.38);
+      addPathWood(x1, y);
+      addPathWood(x2, y - 260, { sx: 0.92, sy: 1.15 });
+      y -= 540;
+      side *= -1;
+    }
+    this.goalWood = this.woodPath[this.woodPath.length - 1]?.wood || null;
+  }
+
+  createStage3Woods() {
+    const startY = GAME_H - 100;
+    const topLimit = startY - (STAGE_CONFIGS[2]?.depth || 5600);
+    this.woodPath = [];
+    const addPathWood = (x, y, variant = null) => {
+      if (y < topLimit) return;
+      const clampedX = Phaser.Math.Clamp(x, 66, GAME_W - 66);
+      const wood = this.addWood(clampedX, y, variant);
+      this.woodPath.push({ x: clampedX, y, wood });
+    };
+    addPathWood(GAME_W / 2, startY, { sx: 1.0, sy: 1.0 });
+
+    let y = startY - 220;
+    let lane = 0;
+    while (y > topLimit) {
+      const x = [GAME_W * 0.18, GAME_W * 0.5, GAME_W * 0.82][lane % 3];
+      addPathWood(x, y);
+      if (lane % 2 === 0) addPathWood(GAME_W * 0.5, y - 210, { sx: 0.92, sy: 1.15 });
+      y -= 440;
+      lane++;
+    }
+    this.goalWood = this.woodPath[this.woodPath.length - 1]?.wood || null;
+  }
+
   addWood(x, y, variant = null) {
     const variants = [
       { sx: 1.2,  sy: 0.95 }, // 横長
@@ -474,6 +544,15 @@ class GameScene extends Phaser.Scene {
 
   // ---- 風船配置 ----
   createBalloons() {
+    if (this.stageIndex === 2) {
+      this.createStage2Balloons();
+      return;
+    }
+    if (this.stageIndex === 3) {
+      this.createStage3Balloons();
+      return;
+    }
+
     const routePoints = [10, 15, 20]; // 連続導線は低め
     const bonusPoints = [50, 70];     // 単体配置は高め
     const path = this.woodPath || [];
@@ -549,6 +628,53 @@ class GameScene extends Phaser.Scene {
     // ワープ風船は一旦無効化（挙動調査まで保留）
     // this.addWarpPair('A', GAME_W * 0.24, GAME_H - 300, GAME_W * 0.76, GAME_H - 460);
     // this.drawWarpGuides();
+  }
+
+  createStage2Balloons() {
+    const points = [15, 20, 30];
+    const bonus = [60, 80];
+    const path = this.woodPath || [];
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i], b = path[i + 1];
+      const yMid = (a.y + b.y) * 0.5;
+      const xMid = (a.x + b.x) * 0.5;
+      this.addBalloon(xMid, yMid - 20, points[i % points.length], 'fixed');
+      this.addBalloon(Phaser.Math.Linear(a.x, b.x, 0.35), yMid - 74, points[(i + 1) % points.length], 'updown');
+      this.addBalloon(Phaser.Math.Linear(a.x, b.x, 0.72), yMid - 118, points[(i + 2) % points.length], 'leftright');
+
+      if (i % 4 === 1) {
+        const bx = (b.x < GAME_W * 0.5) ? GAME_W * 0.84 : GAME_W * 0.16;
+        this.addBalloon(bx, yMid - 64, bonus[i % bonus.length], 'updown');
+      }
+      if (i % 5 === 2) {
+        const rx = (a.x < GAME_W * 0.5) ? GAME_W * 0.72 : GAME_W * 0.28;
+        this.addBalloon(rx, yMid - 26, 0, 'fixed', { kind: 'recover' });
+      }
+    }
+  }
+
+  createStage3Balloons() {
+    const points = [20, 30, 40];
+    const bonus = [70, 90];
+    const path = this.woodPath || [];
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i], b = path[i + 1];
+      const yMid = (a.y + b.y) * 0.5;
+      const xMid = (a.x + b.x) * 0.5;
+      this.addBalloon(xMid, yMid - 18, points[i % points.length], 'leftright');
+      this.addBalloon(Phaser.Math.Linear(a.x, b.x, 0.28), yMid - 70, points[(i + 1) % points.length], 'updown');
+      this.addBalloon(Phaser.Math.Linear(a.x, b.x, 0.52), yMid - 126, points[(i + 2) % points.length], 'leftright');
+      this.addBalloon(Phaser.Math.Linear(a.x, b.x, 0.76), yMid - 176, points[i % points.length], 'updown');
+
+      if (i % 3 === 2) {
+        const bx = (b.x < GAME_W * 0.5) ? GAME_W * 0.88 : GAME_W * 0.12;
+        this.addBalloon(bx, yMid - 96, bonus[i % bonus.length], 'leftright');
+      }
+      if (i % 7 === 4) {
+        const rx = (a.x < GAME_W * 0.5) ? GAME_W * 0.82 : GAME_W * 0.18;
+        this.addBalloon(rx, yMid - 36, 0, 'updown', { kind: 'recover' });
+      }
+    }
   }
 
   createGoalMarker() {
@@ -723,8 +849,9 @@ class GameScene extends Phaser.Scene {
   adjustWarpPosAwayFromWind(x, y) {
     let nx = x;
     let ny = y;
-    for (let i = 0; i < WIND_ZONE_LAYOUT.length; i++) {
-      const wz = WIND_ZONE_LAYOUT[i];
+    const layout = this.getWindLayout();
+    for (let i = 0; i < layout.length; i++) {
+      const wz = layout[i];
       const wx = GAME_W * wz.xRate;
       const wy = GAME_H - 420 + wz.yOffset;
       const dx = nx - wx;
@@ -801,7 +928,7 @@ class GameScene extends Phaser.Scene {
 
   createWinds() {
     const startY = GAME_H - 420;
-    const layout = this.stageIndex === 1 ? WIND_ZONE_LAYOUT : WIND_ZONE_LAYOUT;
+    const layout = this.getWindLayout();
     layout.forEach(w => {
       const key = this.textures.exists(w.key) ? w.key : 'wind_mark_weak';
       const zone = this.windGroup.create(GAME_W * w.xRate, startY + w.yOffset, key);
@@ -824,6 +951,12 @@ class GameScene extends Phaser.Scene {
       zone.windTag = tag;
       zone.debugLabel = this.createDebugObjectLabel(zone, zone.debugId, -58, '#FDD835');
     });
+  }
+
+  getWindLayout() {
+    if (this.stageIndex === 1) return WIND_ZONE_LAYOUT_STAGE1;
+    if (this.stageIndex === 2) return WIND_ZONE_LAYOUT_STAGE2;
+    return WIND_ZONE_LAYOUT_STAGE3;
   }
 
   // ---- 矢のスポーン ----
@@ -1248,6 +1381,30 @@ class GameScene extends Phaser.Scene {
       if (this.showDebugHitbox) this.rebuildDebugObjectLabels();
       this.setDebugOverlayVisible(this.showDebugHitbox);
     });
+
+    const hasNextStage = this.stageIndex < STAGE_COUNT;
+    const nextLabel = hasNextStage ? '次ステージへ' : '最終ステージ';
+    const nextBg = hasNextStage ? '#FF8F00' : '#90A4AE';
+    this.debugNextStageBtn = this.add.text(140, 20, nextLabel, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '16px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      backgroundColor: nextBg,
+      padding: { x: 12, y: 8 }
+    }).setOrigin(0, 0).setDepth(120).setScrollFactor(0);
+
+    if (hasNextStage) {
+      this.debugNextStageBtn.setInteractive({ useHandCursor: true });
+      this.debugNextStageBtn.on('pointerdown', () => {
+        if (this.inputLocked) return;
+        this.scene.restart({
+          stageIndex: this.stageIndex + 1,
+          score: this.score,
+          arrowCount: this.arrowCount
+        });
+      });
+    }
   }
 
   createDebugObjectLabel(target, text, yOffset = -42, color = '#FFFFFF') {
@@ -1295,6 +1452,14 @@ class GameScene extends Phaser.Scene {
     this.debugScreenTexts.forEach(t => t.setVisible(visible));
     this.debugObjectLabels.forEach(t => t.setVisible(visible));
     if (this.debugPanelText) this.debugPanelText.setVisible(visible);
+    if (this.debugNextStageBtn) {
+      this.debugNextStageBtn.setVisible(visible);
+      if (visible && this.stageIndex < STAGE_COUNT) {
+        this.debugNextStageBtn.setInteractive({ useHandCursor: true });
+      } else {
+        this.debugNextStageBtn.disableInteractive();
+      }
+    }
   }
 
   createDebugPanel() {
