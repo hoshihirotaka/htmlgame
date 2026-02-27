@@ -48,9 +48,15 @@ const ARROW_MAX_DRAG  = 120;    // 引っ張りの最大距離（px）
 const ARROW_RANGE_MAX = 1200;   // 最大飛距離
 const ARROW_RANGE_EXP = 1.5;    // 弱い引きで飛距離を短くする補正
 const FALL_GAMEOVER_DISTANCE = 220; // 落下開始後に許容する戻り距離
+const BALLOON_MOVE_SPEED_MIN = 0.0012; // 移動風船の最小速度
+const BALLOON_MOVE_SPEED_MAX = 0.0022; // 移動風船の最大速度
+const WIND_STRENGTH_WEAK = 0.16;  // 風の弱補正
+const WIND_STRENGTH_MID = 0.24;   // 風の中補正
+const WIND_STRENGTH_STRONG = 0.34; // 風の強補正
 const INITIAL_ARROWS  = 5;      // 初期矢の本数
 const WORLD_HEIGHT    = 6000;   // スクロール可能な世界の高さ
 const SHOW_DEBUG_HITBOX = false; // 当たり判定の可視化
+const DEBUG_HITBOX_STORAGE_KEY = 'arrow_balloon_debug_hitbox';
 
 // ============================================================
 //  BootScene: アセット生成（テクスチャをコードで描画）
@@ -64,6 +70,7 @@ class BootScene extends Phaser.Scene {
     this.createWoodTexture();
     this.createWoodPadTexture();
     this.createBalloonTexture();
+    this.createWindTexture();
     this.createWallTexture();
   }
 
@@ -137,6 +144,46 @@ class BootScene extends Phaser.Scene {
     });
   }
 
+  createWindTexture() {
+    const makeWindMark = (key, lineCount) => {
+      const g = this.make.graphics({ x: 0, y: 0, add: false });
+      const w = 108, h = 64;
+      g.fillStyle(0xffffff, 0.12);
+      g.fillEllipse(54, 32, 92, 50);
+
+      // 風の本線: 線の本数で強さを表現
+      g.lineStyle(4, 0x37474f, 0.86);
+      const drawWave = (startX, startY, length, amp, step) => {
+        g.beginPath();
+        g.moveTo(startX, startY);
+        for (let x = startX + step; x <= startX + length; x += step) {
+          const y = startY + Math.sin((x - startX) * 0.22) * amp;
+          g.lineTo(x, y);
+        }
+        g.strokePath();
+      };
+      const topY = 18;
+      for (let i = 0; i < lineCount; i++) {
+        drawWave(14 + i * 2, topY + i * 11, 66 - i * 3, 4.2 - i * 0.3, 4);
+      }
+
+      // 進行方向を示す先端ストローク
+      g.lineStyle(3, 0x37474f, 0.9);
+      g.beginPath();
+      g.moveTo(82, 20); g.lineTo(94, 16);
+      g.moveTo(84, 31); g.lineTo(97, 31);
+      g.moveTo(82, 42); g.lineTo(94, 46);
+      g.strokePath();
+
+      g.generateTexture(key, w, h);
+      g.destroy();
+    };
+
+    makeWindMark('wind_mark_weak', 2);
+    makeWindMark('wind_mark_mid', 3);
+    makeWindMark('wind_mark_strong', 4);
+  }
+
   // 壁テクスチャ
   createWallTexture() {
     const g = this.make.graphics({ x: 0, y: 0, add: false });
@@ -177,6 +224,8 @@ class GameScene extends Phaser.Scene {
     this.flightDistanceLeft = 0;      // 残り飛距離
     this.fallStartY = 0;              // 落下開始時のY
     this.arrowColliders = [];         // 矢に紐づく衝突判定
+    const savedDebug = localStorage.getItem(DEBUG_HITBOX_STORAGE_KEY);
+    this.showDebugHitbox = savedDebug === null ? SHOW_DEBUG_HITBOX : savedDebug === '1';
 
     // ---- 壁生成 ----
     this.createWalls();
@@ -187,8 +236,16 @@ class GameScene extends Phaser.Scene {
     this.createInitialWoods();
 
     // ---- 風船生成 ----
-    this.balloonGroup = this.physics.add.staticGroup();
+    this.balloonGroup = this.physics.add.group({
+      allowGravity: false,
+      immovable: true
+    });
+    this.movingBalloons = [];
     this.createBalloons();
+
+    // ---- 風ギミック ----
+    this.windGroup = this.physics.add.staticGroup();
+    this.createWinds();
 
     // ---- 矢の生成（最初の発射台から） ----
     const firstWood = this.woodGroup.getChildren()[0];
@@ -202,6 +259,7 @@ class GameScene extends Phaser.Scene {
 
     // ---- UI（固定レイヤー） ----
     this.createUI();
+    this.createDebugToggleUI();
 
     // ---- タッチ入力 ----
     this.setupInput();
@@ -270,9 +328,14 @@ class GameScene extends Phaser.Scene {
     collider.setVisible(false);
     collider.setImmovable(true);
     collider.refreshBody();
-    const hitW = Math.round(104 * v.sx);
-    const hitH = Math.round(44 * v.sy);
+    const displayW = 104 * v.sx;
+    const displayH = 44 * v.sy;
+    const hitW = Math.round(displayW);
+    const hitH = Math.round(displayH * 0.5);
     collider.body.setSize(hitW, hitH, true);
+    // 画像の上端に揃えて、下側の判定を削る
+    collider.body.position.x = wood.x - hitW / 2;
+    collider.body.position.y = wood.y - displayH / 2;
     wood.landingCollider = collider;
     collider.parentWood = wood;
     return wood;
@@ -307,19 +370,41 @@ class GameScene extends Phaser.Scene {
     ];
 
     const points = [10, 20, 30, 50];
+    const movePattern = ['fixed', 'updown', 'fixed', 'leftright'];
     routes.forEach(route => {
       route.forEach((pos, i) => {
-        this.addBalloon(pos.x, pos.y, points[i % points.length]);
+        this.addBalloon(
+          pos.x,
+          pos.y,
+          points[i % points.length],
+          movePattern[(i + Phaser.Math.Between(0, 1)) % movePattern.length]
+        );
       });
     });
   }
 
-  addBalloon(x, y, point) {
+  addBalloon(x, y, point, moveType = 'fixed') {
     const colorIdx = Phaser.Math.Between(0, 4);
     const balloon = this.balloonGroup.create(x, y, `balloon_${colorIdx}`);
     balloon.setImmovable(true);
-    balloon.refreshBody();
+    balloon.body.setAllowGravity(false);
+    // 風船本体のみを判定にする（紐は除外）
+    balloon.body.setSize(52, 52);
+    balloon.body.setOffset(10, 10);
     balloon.scoreValue = point;
+    balloon.moveType = moveType;
+    balloon.baseX = x;
+    balloon.baseY = y;
+    balloon.moveAmp = moveType === 'updown'
+      ? Phaser.Math.Between(18, 36)
+      : moveType === 'leftright'
+        ? Phaser.Math.Between(20, 42)
+        : 0;
+    balloon.moveSpeed = Phaser.Math.FloatBetween(BALLOON_MOVE_SPEED_MIN, BALLOON_MOVE_SPEED_MAX);
+    balloon.movePhase = Phaser.Math.FloatBetween(0, Math.PI * 2);
+    if (moveType !== 'fixed') {
+      this.movingBalloons.push(balloon);
+    }
 
     // スコア数値テキスト
     const text = this.add.text(x, y - 14, `+${point}`, {
@@ -333,6 +418,34 @@ class GameScene extends Phaser.Scene {
     balloon.scoreText = text;
 
     return balloon;
+  }
+
+  createWinds() {
+    const startY = GAME_H - 420;
+    const winds = [
+      { x: GAME_W * 0.28, y: startY - 220, dirX: 1, strength: WIND_STRENGTH_WEAK, key: 'wind_mark_weak', label: '右風・弱' },
+      { x: GAME_W * 0.72, y: startY - 520, dirX: -1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '左風・中' },
+      { x: GAME_W * 0.32, y: startY - 900, dirX: 1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '右風・強' },
+    ];
+    winds.forEach(w => {
+      const zone = this.windGroup.create(w.x, w.y, w.key);
+      zone.setImmovable(true);
+      zone.setScale(1.0, 1.0);
+      if (w.dirX < 0) zone.setFlipX(true);
+      zone.refreshBody();
+      zone.windDirX = w.dirX;
+      zone.windStrength = w.strength;
+
+      const tag = this.add.text(w.x, w.y - 40, w.label, {
+        fontFamily: "'M PLUS Rounded 1c'",
+        fontSize: '14px',
+        fontStyle: 'bold',
+        color: '#FFFFFF',
+        stroke: '#FF6B9D',
+        strokeThickness: 3
+      }).setOrigin(0.5);
+      zone.windTag = tag;
+    });
   }
 
   // ---- 矢のスポーン ----
@@ -379,6 +492,11 @@ class GameScene extends Phaser.Scene {
     // 風船
     this.arrowColliders.push(this.physics.add.overlap(this.arrow, this.balloonGroup, (arrow, balloon) => {
       this.hitBalloon(balloon);
+    }));
+
+    // 風ゾーン
+    this.arrowColliders.push(this.physics.add.overlap(this.arrow, this.windGroup, (arrow, windZone) => {
+      this.applyWind(windZone);
     }));
 
     // 木に刺さる
@@ -513,6 +631,21 @@ class GameScene extends Phaser.Scene {
     arrow.setRotation(Math.atan2(vy, -vx));
   }
 
+  applyWind(windZone) {
+    if (!this.arrow || !this.isFlying || !this.arrow.body) return;
+    const dirX = windZone.windDirX || 1;
+    const strength = windZone.windStrength || WIND_STRENGTH_WEAK;
+
+    const vx = this.arrow.body.velocity.x;
+    const vy = this.arrow.body.velocity.y;
+    const speed = Math.max(260, Math.sqrt(vx * vx + vy * vy));
+    const targetVx = dirX * speed;
+    const nextVx = Phaser.Math.Linear(vx, targetVx, strength);
+    const nextVy = vy * (1 - strength * 0.35);
+
+    this.arrow.body.setVelocity(nextVx, nextVy);
+  }
+
   // ---- 風船ヒット ----
   hitBalloon(balloon) {
     // スコア加算
@@ -527,6 +660,7 @@ class GameScene extends Phaser.Scene {
       alpha: 0,
       duration: 200,
       onComplete: () => {
+        this.movingBalloons = this.movingBalloons.filter(b => b !== balloon);
         if (balloon.scoreText) balloon.scoreText.destroy();
         balloon.destroy();
       }
@@ -618,6 +752,27 @@ class GameScene extends Phaser.Scene {
     this.rebuildArrowUI();
   }
 
+  createDebugToggleUI() {
+    const label = this.showDebugHitbox ? '判定: ON' : '判定: OFF';
+    const bg = this.showDebugHitbox ? '#00C853' : '#B0BEC5';
+    this.debugToggleBtn = this.add.text(16, 20, label, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '16px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      backgroundColor: bg,
+      padding: { x: 12, y: 8 }
+    }).setOrigin(0, 0).setDepth(120).setScrollFactor(0).setInteractive({ useHandCursor: true });
+
+    this.debugToggleBtn.on('pointerdown', () => {
+      this.showDebugHitbox = !this.showDebugHitbox;
+      this.debugToggleBtn.setText(this.showDebugHitbox ? '判定: ON' : '判定: OFF');
+      this.debugToggleBtn.setStyle({ backgroundColor: this.showDebugHitbox ? '#00C853' : '#B0BEC5' });
+      localStorage.setItem(DEBUG_HITBOX_STORAGE_KEY, this.showDebugHitbox ? '1' : '0');
+      if (!this.showDebugHitbox) this.hitboxGraphics.clear();
+    });
+  }
+
   startFalling() {
     if (this.isFalling) return;
     this.isFalling = true;
@@ -628,6 +783,7 @@ class GameScene extends Phaser.Scene {
   // ---- 毎フレーム更新 ----
   update(time, delta) {
     this.drawDebugHitboxes();
+    this.updateMovingBalloons(time);
     if (!this.arrow || !this.isFlying) return;
 
     const dt = delta / 1000;
@@ -680,8 +836,29 @@ class GameScene extends Phaser.Scene {
 
   }
 
+  updateMovingBalloons(time) {
+    if (!this.movingBalloons || this.movingBalloons.length === 0) return;
+    for (let i = this.movingBalloons.length - 1; i >= 0; i--) {
+      const balloon = this.movingBalloons[i];
+      if (!balloon || !balloon.active || !balloon.body) {
+        this.movingBalloons.splice(i, 1);
+        continue;
+      }
+      const t = time * balloon.moveSpeed + balloon.movePhase;
+      if (balloon.moveType === 'updown') {
+        balloon.setPosition(balloon.baseX, balloon.baseY + Math.sin(t) * balloon.moveAmp);
+      } else if (balloon.moveType === 'leftright') {
+        balloon.setPosition(balloon.baseX + Math.sin(t) * balloon.moveAmp, balloon.baseY);
+      }
+      balloon.body.updateFromGameObject();
+      if (balloon.scoreText && balloon.scoreText.active) {
+        balloon.scoreText.setPosition(balloon.x, balloon.y - 14);
+      }
+    }
+  }
+
   drawDebugHitboxes() {
-    if (!SHOW_DEBUG_HITBOX || !this.hitboxGraphics || !this.woodColliderGroup) return;
+    if (!this.showDebugHitbox || !this.hitboxGraphics || !this.woodColliderGroup) return;
 
     this.hitboxGraphics.clear();
     // 木の当たり判定（緑）
@@ -693,6 +870,30 @@ class GameScene extends Phaser.Scene {
       this.hitboxGraphics.fillRect(b.x, b.y, b.width, b.height);
       this.hitboxGraphics.strokeRect(b.x, b.y, b.width, b.height);
     });
+
+    // 風船の当たり判定（青）
+    if (this.balloonGroup) {
+      this.hitboxGraphics.lineStyle(2, 0x2979ff, 0.95);
+      this.hitboxGraphics.fillStyle(0x2979ff, 0.15);
+      this.balloonGroup.getChildren().forEach(balloon => {
+        if (!balloon.active || !balloon.body) return;
+        const b = balloon.body;
+        this.hitboxGraphics.fillRect(b.x, b.y, b.width, b.height);
+        this.hitboxGraphics.strokeRect(b.x, b.y, b.width, b.height);
+      });
+    }
+
+    // 風ゾーンの当たり判定（黄）
+    if (this.windGroup) {
+      this.hitboxGraphics.lineStyle(2, 0xfdd835, 0.95);
+      this.hitboxGraphics.fillStyle(0xfdd835, 0.18);
+      this.windGroup.getChildren().forEach(zone => {
+        if (!zone.active || !zone.body) return;
+        const b = zone.body;
+        this.hitboxGraphics.fillRect(b.x, b.y, b.width, b.height);
+        this.hitboxGraphics.strokeRect(b.x, b.y, b.width, b.height);
+      });
+    }
 
     // 矢の当たり判定（赤）
     if (this.arrow && this.arrow.body) {
