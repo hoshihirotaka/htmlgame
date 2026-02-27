@@ -60,6 +60,7 @@ const WIND_ZONE_LAYOUT = [
   { xRate: 0.32, yOffset: -900, dirX: 1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '右風・強' }
 ];
 const INITIAL_ARROWS  = 5;      // 初期矢の本数
+const MAX_ARROWS = 9;           // 最大矢ストック
 const WORLD_HEIGHT    = 6000;   // スクロール可能な世界の高さ
 const SHOW_DEBUG_HITBOX = false; // 当たり判定の可視化
 const DEBUG_HITBOX_STORAGE_KEY = 'arrow_balloon_debug_hitbox';
@@ -76,6 +77,7 @@ class BootScene extends Phaser.Scene {
     this.createWoodTexture();
     this.createWoodPadTexture();
     this.createBalloonTexture();
+    this.createRecoverBalloonTexture();
     this.createWarpBalloonTexture();
     this.createWindTexture();
     this.createWallTexture();
@@ -162,6 +164,19 @@ class BootScene extends Phaser.Scene {
     g.strokeCircle(r, r, 30);
     // 紐なしなので正円サイズで生成（中心座標ズレを防ぐ）
     g.generateTexture('balloon_warp', r * 2, r * 2);
+    g.destroy();
+  }
+
+  createRecoverBalloonTexture() {
+    const g = this.make.graphics({ x: 0, y: 0, add: false });
+    const r = 36;
+    g.fillStyle(0x9ccc65, 0.95);
+    g.fillCircle(r, r, r);
+    g.fillStyle(0xffffff, 0.35);
+    g.fillEllipse(r - 10, r - 12, 18, 12);
+    g.lineStyle(4, 0xffffff, 0.9);
+    g.strokeCircle(r, r, 23);
+    g.generateTexture('balloon_recover', r * 2, r * 2 + 20);
     g.destroy();
   }
 
@@ -427,6 +442,10 @@ class GameScene extends Phaser.Scene {
       }
     });
 
+    // 回復風船（矢+1）
+    this.addBalloon(GAME_W * 0.52, GAME_H - 640, 0, 'fixed', { kind: 'recover' });
+    this.addBalloon(GAME_W * 0.44, GAME_H - 980, 0, 'updown', { kind: 'recover' });
+
     // ワープ風船は一旦無効化（挙動調査まで保留）
     // this.addWarpPair('A', GAME_W * 0.24, GAME_H - 300, GAME_W * 0.76, GAME_H - 460);
     // this.drawWarpGuides();
@@ -434,8 +453,9 @@ class GameScene extends Phaser.Scene {
 
   addBalloon(x, y, point, moveType = 'fixed', options = {}) {
     const isWarp = options.kind === 'warp';
+    const isRecover = options.kind === 'recover';
     const colorIdx = Phaser.Math.Between(0, 4);
-    const texture = isWarp ? 'balloon_warp' : `balloon_${colorIdx}`;
+    const texture = isWarp ? 'balloon_warp' : isRecover ? 'balloon_recover' : `balloon_${colorIdx}`;
     const textureKey = this.textures.exists(texture) ? texture : 'balloon_0';
     const balloon = this.balloonGroup.create(x, y, textureKey);
     balloon.setImmovable(true);
@@ -448,8 +468,8 @@ class GameScene extends Phaser.Scene {
       balloon.body.setSize(52, 52);
       balloon.body.setOffset(10, 10);
     }
-    balloon.scoreValue = isWarp ? 0 : point;
-    balloon.kind = isWarp ? 'warp' : 'normal';
+    balloon.scoreValue = (isWarp || isRecover) ? 0 : point;
+    balloon.kind = isWarp ? 'warp' : isRecover ? 'recover' : 'normal';
     balloon.warpPairId = options.warpPairId || null;
     balloon.moveType = moveType;
     balloon.baseX = x;
@@ -466,12 +486,12 @@ class GameScene extends Phaser.Scene {
     }
 
     // スコア数値テキスト
-    const text = this.add.text(x, y - 14, isWarp ? '' : `+${point}`, {
+    const text = this.add.text(x, y - 14, isWarp ? '' : isRecover ? '🏹+1' : `+${point}`, {
       fontFamily: "'M PLUS Rounded 1c'",
       fontSize: '16px',
       fontStyle: 'bold',
       color: '#FFFFFF',
-      stroke: isWarp ? '#5C6BC0' : '#FF6B9D',
+      stroke: isWarp ? '#5C6BC0' : isRecover ? '#558B2F' : '#FF6B9D',
       strokeThickness: 3
     }).setOrigin(0.5);
     balloon.scoreText = text;
@@ -824,6 +844,14 @@ class GameScene extends Phaser.Scene {
       this.activateWarp(balloon);
       return;
     }
+    if (balloon.isConsumed) return;
+    balloon.isConsumed = true;
+    if (balloon.body) balloon.body.enable = false;
+
+    if (balloon.kind === 'recover') {
+      this.arrowCount = Math.min(MAX_ARROWS, this.arrowCount + 1);
+      this.updateArrowUI();
+    }
 
     // スコア加算
     this.score += balloon.scoreValue;
@@ -844,11 +872,13 @@ class GameScene extends Phaser.Scene {
     });
 
     // ポップテキスト
-    const popText = this.add.text(balloon.x, balloon.y - 20, `+${balloon.scoreValue}`, {
+    const popLabel = balloon.kind === 'recover' ? '🏹+1' : `+${balloon.scoreValue}`;
+    const popColor = balloon.kind === 'recover' ? '#7CB342' : '#FF6B9D';
+    const popText = this.add.text(balloon.x, balloon.y - 20, popLabel, {
       fontFamily: "'M PLUS Rounded 1c'",
       fontSize: '24px',
       fontStyle: 'bold',
-      color: '#FF6B9D',
+      color: popColor,
       stroke: '#FFFFFF',
       strokeThickness: 4
     }).setOrigin(0.5).setDepth(20);
