@@ -79,6 +79,7 @@ const STAGE_CONFIGS = [
 const INITIAL_ARROWS  = 5;      // 初期矢の本数
 const MAX_ARROWS = 9;           // 最大矢ストック
 const WORLD_HEIGHT    = 6000;   // スクロール可能な世界の高さ
+const ENABLE_DEBUG_UI = false;  // デバッグUI表示フラグ
 const SHOW_DEBUG_HITBOX = false; // 当たり判定の可視化
 const DEBUG_HITBOX_STORAGE_KEY = 'arrow_balloon_debug_hitbox';
 
@@ -325,7 +326,7 @@ class GameScene extends Phaser.Scene {
       boost:  { label: 'ブースト', speedMul: 1.22, rangeMul: 1.18, windMul: 0.9, uiColor: '#FF8F00' }
     };
     const savedDebug = localStorage.getItem(DEBUG_HITBOX_STORAGE_KEY);
-    this.showDebugHitbox = savedDebug === null ? SHOW_DEBUG_HITBOX : savedDebug === '1';
+    this.showDebugHitbox = ENABLE_DEBUG_UI && (savedDebug === null ? SHOW_DEBUG_HITBOX : savedDebug === '1');
 
     // ---- 壁生成 ----
     this.createWalls();
@@ -361,7 +362,6 @@ class GameScene extends Phaser.Scene {
 
     // ---- UI（固定レイヤー） ----
     this.createUI();
-    this.createDebugToggleUI();
     this.showStageBanner(`STAGE ${this.stageIndex}`, STAGE_CONFIGS[this.stageIndex - 1]?.name || '');
 
     // ---- タッチ入力 ----
@@ -373,14 +373,17 @@ class GameScene extends Phaser.Scene {
     this.dragGraphics.setScrollFactor(0);
 
     // ---- デバッグ表示 ----
-    this.hitboxGraphics = this.add.graphics();
-    this.hitboxGraphics.setDepth(30);
-    this.debugScreenGraphics = this.add.graphics();
-    this.debugScreenGraphics.setDepth(31);
-    this.createDebugScreenGuides();
-    this.rebuildDebugObjectLabels();
-    this.createDebugPanel();
-    this.setDebugOverlayVisible(this.showDebugHitbox);
+    if (ENABLE_DEBUG_UI) {
+      this.createDebugToggleUI();
+      this.hitboxGraphics = this.add.graphics();
+      this.hitboxGraphics.setDepth(30);
+      this.debugScreenGraphics = this.add.graphics();
+      this.debugScreenGraphics.setDepth(31);
+      this.createDebugScreenGuides();
+      this.rebuildDebugObjectLabels();
+      this.createDebugPanel();
+      this.setDebugOverlayVisible(this.showDebugHitbox);
+    }
   }
 
   // ---- 壁生成 ----
@@ -1315,16 +1318,8 @@ class GameScene extends Phaser.Scene {
     this.arrowUIContainer = this.add.container(0, GAME_H - 50).setDepth(100).setScrollFactor(0);
     this.rebuildArrowUI();
 
-    // 矢タイプ表示（特殊矢の土台）
-    this.arrowTypeText = this.add.text(16, 62, '矢タイプ: ノーマル', {
-      fontFamily: "'M PLUS Rounded 1c'",
-      fontSize: '16px',
-      fontStyle: 'bold',
-      color: '#FFFFFF',
-      backgroundColor: '#FF6B9D',
-      padding: { x: 12, y: 7 }
-    }).setOrigin(0, 0).setDepth(110).setScrollFactor(0);
-    this.updateArrowTypeUI();
+    // 矢タイプ表示は公開版では非表示
+    this.arrowTypeText = null;
   }
 
   updateScoreUI() {
@@ -1408,6 +1403,7 @@ class GameScene extends Phaser.Scene {
   }
 
   createDebugObjectLabel(target, text, yOffset = -42, color = '#FFFFFF') {
+    if (!ENABLE_DEBUG_UI) return null;
     const label = this.add.text(target.x, target.y + yOffset, text, {
       fontFamily: "'M PLUS Rounded 1c'",
       fontSize: '13px',
