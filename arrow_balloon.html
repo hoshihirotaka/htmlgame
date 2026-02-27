@@ -59,6 +59,12 @@ const WIND_ZONE_LAYOUT = [
   { xRate: 0.72, yOffset: -520, dirX: -1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '左風・中' },
   { xRate: 0.32, yOffset: -900, dirX: 1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '右風・強' }
 ];
+const STAGE_COUNT = 3;
+const STAGE_CONFIGS = [
+  { name: 'はじまりの森', depth: 1700 },
+  { name: 'かぜの回廊', depth: 2200 },
+  { name: 'よるぞらの塔', depth: 2700 }
+];
 const INITIAL_ARROWS  = 5;      // 初期矢の本数
 const MAX_ARROWS = 9;           // 最大矢ストック
 const WORLD_HEIGHT    = 6000;   // スクロール可能な世界の高さ
@@ -245,14 +251,20 @@ class BootScene extends Phaser.Scene {
 class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
 
+  init(data) {
+    this.stageIndex = data?.stageIndex || 1;
+    this.carriedScore = typeof data?.score === 'number' ? data.score : 0;
+    this.carriedArrows = typeof data?.arrowCount === 'number' ? data.arrowCount : INITIAL_ARROWS;
+  }
+
   create() {
     // ---- 世界の設定 ----
     this.physics.world.setBounds(0, -WORLD_HEIGHT + GAME_H, GAME_W, WORLD_HEIGHT);
     this.cameras.main.setBounds(0, -WORLD_HEIGHT + GAME_H, GAME_W, WORLD_HEIGHT);
 
     // ---- ゲーム状態 ----
-    this.arrowCount = INITIAL_ARROWS; // 残り矢の本数
-    this.score      = 0;
+    this.arrowCount = this.carriedArrows; // 残り矢の本数
+    this.score      = this.carriedScore;
     this.isFlying   = false;          // 矢が飛行中か
     this.isFalling  = false;          // 飛距離切れで落下中か
     this.isDragging = false;          // スワイプ引っ張り中か
@@ -260,8 +272,15 @@ class GameScene extends Phaser.Scene {
     this.flightDistanceLeft = 0;      // 残り飛距離
     this.fallStartY = 0;              // 落下開始時のY
     this.arrowColliders = [];         // 矢に紐づく衝突判定
+    this.woodSpawnIndex = 0;          // 木バリエーションの固定シーケンス用
     this.arrowTypeText = null;        // シーン再開始時の破棄済み参照をクリア
     this.debugToggleBtn = null;
+    this.debugPanelText = null;
+    this.nextWoodId = 1;
+    this.nextBalloonId = 1;
+    this.nextWindId = 1;
+    this.debugObjectLabels = [];
+    this.debugScreenTexts = [];
     this.shotsFired = 0;              // 発射済み本数
     this.currentArrowType = 'normal'; // 現在の矢タイプ
     this.currentArrowConfig = null;
@@ -296,6 +315,7 @@ class GameScene extends Phaser.Scene {
     this.movingBalloons = [];
     this.warpPairs = [];
     this.createBalloons();
+    this.createGoalMarker();
 
     // ---- 矢の生成（最初の発射台から） ----
     const firstWood = this.woodGroup.getChildren()[0];
@@ -310,6 +330,7 @@ class GameScene extends Phaser.Scene {
     // ---- UI（固定レイヤー） ----
     this.createUI();
     this.createDebugToggleUI();
+    this.showStageBanner(`STAGE ${this.stageIndex}`, STAGE_CONFIGS[this.stageIndex - 1]?.name || '');
 
     // ---- タッチ入力 ----
     this.setupInput();
@@ -322,6 +343,12 @@ class GameScene extends Phaser.Scene {
     // ---- デバッグ表示 ----
     this.hitboxGraphics = this.add.graphics();
     this.hitboxGraphics.setDepth(30);
+    this.debugScreenGraphics = this.add.graphics();
+    this.debugScreenGraphics.setDepth(31);
+    this.createDebugScreenGuides();
+    this.rebuildDebugObjectLabels();
+    this.createDebugPanel();
+    this.setDebugOverlayVisible(this.showDebugHitbox);
   }
 
   // ---- 壁生成 ----
@@ -342,20 +369,49 @@ class GameScene extends Phaser.Scene {
 
   // ---- 木オブジェクト初期配置 ----
   createInitialWoods() {
-    // 最初の台（画面下部中央）
     const startY = GAME_H - 100;
-    this.addWood(GAME_W / 2, startY, { sx: 1.0, sy: 1.0 });
+    const stageDepth = STAGE_CONFIGS[this.stageIndex - 1]?.depth || STAGE_CONFIGS[0].depth;
+    const topLimit = startY - stageDepth;
+    const totalSpan = startY - topLimit;
+    const screenCount = Math.ceil(totalSpan / GAME_H);
+    this.woodPath = [];
 
-    // 上方に間隔をあけて複数配置（Phase 1: 固定位置）
-    const positions = [
-      { x: GAME_W * 0.35, y: startY - 260 },
-      { x: GAME_W * 0.65, y: startY - 520 },
-      { x: GAME_W * 0.4,  y: startY - 780 },
-      { x: GAME_W * 0.6,  y: startY - 1040 },
-      { x: GAME_W * 0.3,  y: startY - 1300 },
-      { x: GAME_W * 0.7,  y: startY - 1560 },
-    ];
-    positions.forEach(p => this.addWood(p.x, p.y));
+    const addPathWood = (x, y, variant = null) => {
+      if (y < topLimit) return;
+      const clampedX = Phaser.Math.Clamp(x, 66, GAME_W - 66);
+      const wood = this.addWood(clampedX, y, variant);
+      this.woodPath.push({ x: clampedX, y, wood });
+    };
+
+    // 最初の台（画面下部中央）
+    addPathWood(GAME_W / 2, startY, { sx: 1.0, sy: 1.0 });
+
+    // 1画面あたり1〜2本。奇数スクリーンは2本、偶数は1本にして学習→判断の流れを作る
+    for (let s = 0; s < screenCount; s++) {
+      const screenBottom = startY - s * GAME_H;
+      const screenTop = screenBottom - GAME_H;
+      const leftX = GAME_W * 0.24;
+      const midX = GAME_W * 0.5;
+      const rightX = GAME_W * 0.76;
+      const primaryX = (s % 2 === 0) ? leftX : rightX;
+      const secondaryX = (s % 2 === 0) ? rightX : leftX;
+
+      const y1 = screenBottom - GAME_H * 0.34;
+      const y2 = screenBottom - GAME_H * 0.68;
+
+      addPathWood(primaryX, y1);
+      if (s % 2 === 1) {
+        addPathWood(secondaryX, y2);
+      } else if (s % 4 === 0) {
+        // ときどき中央の補助足場を追加してルート自由度を上げる
+        addPathWood(midX, y2, { sx: 0.92, sy: 1.15 });
+      }
+
+      if (screenTop < topLimit) break;
+    }
+
+    const last = this.woodPath[this.woodPath.length - 1];
+    this.goalWood = last ? last.wood : null;
   }
 
   addWood(x, y, variant = null) {
@@ -366,8 +422,10 @@ class GameScene extends Phaser.Scene {
       { sx: 0.84, sy: 1.95 }, // 正方形寄り
       { sx: 0.92, sy: 1.15 }, // 小さめ
     ];
-    const v = variant || Phaser.Utils.Array.GetRandom(variants);
+    const v = variant || variants[this.woodSpawnIndex % variants.length];
+    this.woodSpawnIndex++;
     const wood = this.woodGroup.create(x, y, 'wood');
+    wood.debugId = `W${String(this.nextWoodId++).padStart(3, '0')}`;
     wood.setAngle(0);
     wood.setScale(v.sx, v.sy);
     wood.setImmovable(true);
@@ -388,67 +446,170 @@ class GameScene extends Phaser.Scene {
     collider.body.position.y = wood.y - displayH / 2;
     wood.landingCollider = collider;
     collider.parentWood = wood;
+    wood.debugLabel = this.createDebugObjectLabel(wood, wood.debugId, -40, '#00C853');
     return wood;
   }
 
   // ---- 風船配置 ----
   createBalloons() {
-    // Phase 2: コンボ導線が見えるよう、木の近くに連続ルートを形成
-    const points = [10, 20, 30, 50];
-    const routeDefs = [
-      // 開始直後: 中央→左上へ、初心者向けに密集
-      {
-        startX: 190,
-        startY: GAME_H - 270,
-        stepX: -20,
-        stepY: -56,
-        count: 5,
-        movePattern: ['fixed', 'fixed', 'updown', 'fixed', 'leftright']
-      },
-      // 1つ目の木付近: 左下→右上の回収ライン
-      {
-        startX: 120,
-        startY: GAME_H - 520,
-        stepX: 30,
-        stepY: -52,
-        count: 6,
-        movePattern: ['fixed', 'updown', 'fixed', 'leftright', 'fixed', 'updown']
-      },
-      // 風ゾーン(中段)付近: 右寄りに誘導
-      {
-        startX: 250,
-        startY: GAME_H - 770,
-        stepX: -22,
-        stepY: -52,
-        count: 5,
-        movePattern: ['leftright', 'fixed', 'updown', 'fixed', 'leftright']
-      },
-      // 上段: ジグザグで連続ヒットしやすく
-      {
-        startX: 130,
-        startY: GAME_H - 1020,
-        stepX: 34,
-        stepY: -50,
-        count: 7,
-        movePattern: ['fixed', 'updown', 'fixed', 'leftright', 'fixed', 'updown', 'fixed']
-      }
-    ];
+    const routePoints = [10, 15, 20]; // 連続導線は低め
+    const bonusPoints = [50, 70];     // 単体配置は高め
+    const path = this.woodPath || [];
+    if (path.length < 2) return;
 
-    routeDefs.forEach(route => {
-      for (let i = 0; i < route.count; i++) {
-        const x = Phaser.Math.Clamp(route.startX + route.stepX * i, 70, GAME_W - 70);
-        const y = route.startY + route.stepY * i;
-        this.addBalloon(x, y, points[i % points.length], route.movePattern[i % route.movePattern.length]);
-      }
-    });
+    const startY = path[0].y;
+    const endY = path[path.length - 1].y;
+    const total = Math.max(1, startY - endY);
+    let pointIdx = 0;
+    const recoverPlacedScreens = new Set();
 
-    // 回復風船（矢+1）
-    this.addBalloon(GAME_W * 0.52, GAME_H - 640, 0, 'fixed', { kind: 'recover' });
-    this.addBalloon(GAME_W * 0.44, GAME_H - 980, 0, 'updown', { kind: 'recover' });
+    // 木→木の間に連続配置。進行率で難易度を上げる
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i];
+      const b = path[i + 1];
+      const progress = Phaser.Math.Clamp((startY - a.y) / total, 0, 1);
+      const segDx = b.x - a.x;
+      const absDx = Math.abs(segDx);
+      const phase = progress < 0.10 ? 'tutorial' : progress < 0.50 ? 'mid' : 'late';
+      const centerY = (a.y + b.y) * 0.5;
+      const screenIdx = Math.max(0, Math.floor((startY - centerY) / GAME_H));
+
+      // 基本ルート: 足場間に3連配置（序盤は固定で規則的）
+      const counts = phase === 'tutorial' ? 3 : 4;
+      for (let k = 1; k <= counts; k++) {
+        const t = k / (counts + 1);
+        const x = Phaser.Math.Linear(a.x, b.x, t);
+        const y = Phaser.Math.Linear(a.y, b.y, t) - (phase === 'tutorial' ? 18 : 22);
+        let moveType = 'fixed';
+        if (phase === 'mid' && k >= 3) moveType = (k % 2 === 0) ? 'updown' : 'fixed';
+        if (phase === 'late') moveType = (k % 2 === 0) ? 'leftright' : 'updown';
+        this.addBalloon(x, y, routePoints[(pointIdx + k) % routePoints.length], moveType);
+        pointIdx++;
+      }
+
+      // 直線になりすぎる区間は、壁反射誘導のサブ風船を追加
+      if (phase !== 'tutorial' && absDx < 46 && i % 2 === 0) {
+        const wallX = (a.x < GAME_W * 0.5) ? GAME_W - 56 : 56;
+        const wallY = (a.y + b.y) * 0.5 - 40;
+        this.addBalloon(wallX, wallY, bonusPoints[(i / 2) % bonusPoints.length], phase === 'mid' ? 'fixed' : 'leftright');
+        pointIdx++;
+      }
+
+      // 単体高得点風船（離れた位置の判断報酬）
+      if (phase === 'mid' && i % 7 === 3) {
+        const bx = (b.x < GAME_W * 0.5) ? GAME_W * 0.82 : GAME_W * 0.18;
+        const by = (a.y + b.y) * 0.5 - 90;
+        this.addBalloon(bx, by, bonusPoints[i % bonusPoints.length], 'fixed');
+      }
+      if (phase === 'late' && i % 6 === 2) {
+        const bx = (b.x < GAME_W * 0.5) ? GAME_W * 0.88 : GAME_W * 0.12;
+        const by = (a.y + b.y) * 0.5 - 100;
+        this.addBalloon(bx, by, bonusPoints[(i + 1) % bonusPoints.length], 'updown');
+      }
+
+      // 回復風船: ほぼ1画面に1個（進行不能を防ぐ）
+      if (!recoverPlacedScreens.has(screenIdx)) {
+        let rx = Phaser.Math.Clamp((a.x + b.x) * 0.5, 82, GAME_W - 82);
+        let ry = centerY - 30;
+        let moveType = 'fixed';
+        if (phase === 'mid') {
+          rx = (b.x < GAME_W * 0.5) ? GAME_W * 0.74 : GAME_W * 0.26;
+        }
+        if (phase === 'late') {
+          rx = (b.x < GAME_W * 0.5) ? GAME_W * 0.80 : GAME_W * 0.20;
+          moveType = 'updown';
+        }
+        this.addBalloon(rx, ry, 0, moveType, { kind: 'recover' });
+        recoverPlacedScreens.add(screenIdx);
+      }
+    }
 
     // ワープ風船は一旦無効化（挙動調査まで保留）
     // this.addWarpPair('A', GAME_W * 0.24, GAME_H - 300, GAME_W * 0.76, GAME_H - 460);
     // this.drawWarpGuides();
+  }
+
+  createGoalMarker() {
+    if (!this.goalWood) return;
+    const gx = this.goalWood.x;
+    const gy = this.goalWood.y - 92;
+    this.goalRing = this.add.circle(gx, gy, 26, 0xfff59d, 0.28).setDepth(8);
+    this.goalLabel = this.add.text(gx, gy, 'GOAL', {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '22px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      stroke: '#FF6B9D',
+      strokeThickness: 5
+    }).setOrigin(0.5).setDepth(9);
+  }
+
+  showStageBanner(title, subtitle = '') {
+    const overlay = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.36)
+      .setDepth(300)
+      .setScrollFactor(0);
+    const t1 = this.add.text(GAME_W / 2, GAME_H / 2 - 24, title, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '42px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      stroke: '#FF6B9D',
+      strokeThickness: 6
+    }).setOrigin(0.5).setDepth(301).setScrollFactor(0);
+    const t2 = this.add.text(GAME_W / 2, GAME_H / 2 + 26, subtitle, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '20px',
+      color: '#FFFFFF',
+      stroke: '#FF6B9D',
+      strokeThickness: 4
+    }).setOrigin(0.5).setDepth(301).setScrollFactor(0);
+    this.inputLocked = true;
+    this.time.delayedCall(850, () => {
+      overlay.destroy();
+      t1.destroy();
+      t2.destroy();
+      this.inputLocked = false;
+    });
+  }
+
+  handleStageClear() {
+    this.isFlying = false;
+    this.isFalling = false;
+    if (this.arrow && this.arrow.body) {
+      this.arrow.body.setVelocity(0, 0);
+      this.arrow.body.setAllowGravity(false);
+    }
+    this.inputLocked = true;
+
+    const isFinal = this.stageIndex >= STAGE_COUNT;
+    const title = isFinal ? 'ALL CLEAR!' : `STAGE ${this.stageIndex} CLEAR`;
+    const subtitle = isFinal ? 'おつかれさま！' : 'つぎのステージへ';
+    const overlay = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.42)
+      .setDepth(320)
+      .setScrollFactor(0);
+    const text = this.add.text(GAME_W / 2, GAME_H / 2, `${title}\n${subtitle}`, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '36px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      stroke: '#FF6B9D',
+      strokeThickness: 6,
+      align: 'center'
+    }).setOrigin(0.5).setDepth(321).setScrollFactor(0);
+
+    this.time.delayedCall(1300, () => {
+      overlay.destroy();
+      text.destroy();
+      if (isFinal) {
+        this.scene.start('GameOver', { score: this.score, clear: true });
+      } else {
+        this.scene.restart({
+          stageIndex: this.stageIndex + 1,
+          score: this.score,
+          arrowCount: this.arrowCount
+        });
+      }
+    });
   }
 
   addBalloon(x, y, point, moveType = 'fixed', options = {}) {
@@ -458,6 +619,7 @@ class GameScene extends Phaser.Scene {
     const texture = isWarp ? 'balloon_warp' : isRecover ? 'balloon_recover' : `balloon_${colorIdx}`;
     const textureKey = this.textures.exists(texture) ? texture : 'balloon_0';
     const balloon = this.balloonGroup.create(x, y, textureKey);
+    balloon.debugId = `B${String(this.nextBalloonId++).padStart(3, '0')}`;
     balloon.setImmovable(true);
     balloon.body.setAllowGravity(false);
     // 風船本体のみを判定にする（紐は除外）
@@ -495,6 +657,8 @@ class GameScene extends Phaser.Scene {
       strokeThickness: 3
     }).setOrigin(0.5);
     balloon.scoreText = text;
+    const typeCode = isRecover ? 'R' : isWarp ? 'W' : 'N';
+    balloon.debugLabel = this.createDebugObjectLabel(balloon, `${balloon.debugId}-${typeCode}`, -52, '#2979FF');
 
     return balloon;
   }
@@ -612,6 +776,7 @@ class GameScene extends Phaser.Scene {
     WIND_ZONE_LAYOUT.forEach(w => {
       const key = this.textures.exists(w.key) ? w.key : 'wind_mark_weak';
       const zone = this.windGroup.create(GAME_W * w.xRate, startY + w.yOffset, key);
+      zone.debugId = `F${String(this.nextWindId++).padStart(3, '0')}`;
       zone.setImmovable(true);
       zone.setScale(1.0, 1.0);
       if (w.dirX < 0) zone.setFlipX(true);
@@ -628,6 +793,7 @@ class GameScene extends Phaser.Scene {
         strokeThickness: 3
       }).setOrigin(0.5);
       zone.windTag = tag;
+      zone.debugLabel = this.createDebugObjectLabel(zone, zone.debugId, -58, '#FDD835');
     });
   }
 
@@ -699,6 +865,7 @@ class GameScene extends Phaser.Scene {
   // ---- 入力設定 ----
   setupInput() {
     this.input.on('pointerdown', (ptr) => {
+      if (this.inputLocked) return;
       if (this.isFlying) return; // 飛行中はスワイプ不可
       this.isDragging = true;
       this.dragStart  = { x: ptr.x, y: ptr.y };
@@ -934,6 +1101,10 @@ class GameScene extends Phaser.Scene {
 
   // ---- 木に刺さる ----
   stickToWood(wood) {
+    if (wood === this.goalWood) {
+      this.handleStageClear();
+      return;
+    }
     this.isFlying = false;
     this.isFalling = false;
     this.arrow.body.setVelocity(0, 0);
@@ -1040,7 +1211,110 @@ class GameScene extends Phaser.Scene {
       this.debugToggleBtn.setBackgroundColor(this.showDebugHitbox ? '#00C853' : '#B0BEC5');
       localStorage.setItem(DEBUG_HITBOX_STORAGE_KEY, this.showDebugHitbox ? '1' : '0');
       if (!this.showDebugHitbox) this.hitboxGraphics.clear();
+      if (this.showDebugHitbox) this.rebuildDebugObjectLabels();
+      this.setDebugOverlayVisible(this.showDebugHitbox);
     });
+  }
+
+  createDebugObjectLabel(target, text, yOffset = -42, color = '#FFFFFF') {
+    const label = this.add.text(target.x, target.y + yOffset, text, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '13px',
+      fontStyle: 'bold',
+      color,
+      stroke: '#000000',
+      strokeThickness: 3
+    }).setOrigin(0.5).setDepth(132);
+    label.debugTarget = target;
+    label.debugOffsetY = yOffset;
+    this.debugObjectLabels.push(label);
+    return label;
+  }
+
+  createDebugScreenGuides() {
+    if (!this.debugScreenGraphics) return;
+    const topLimit = -WORLD_HEIGHT + GAME_H;
+    const count = Math.ceil(WORLD_HEIGHT / GAME_H);
+    this.debugScreenGraphics.clear();
+    this.debugScreenGraphics.lineStyle(1.5, 0xffffff, 0.28);
+    for (let i = 0; i <= count; i++) {
+      const y = GAME_H - i * GAME_H;
+      if (y < topLimit) break;
+      this.debugScreenGraphics.beginPath();
+      this.debugScreenGraphics.moveTo(0, y);
+      this.debugScreenGraphics.lineTo(GAME_W, y);
+      this.debugScreenGraphics.strokePath();
+      const t = this.add.text(10, y + 8, `画面 ${i}`, {
+        fontFamily: "'M PLUS Rounded 1c'",
+        fontSize: '12px',
+        fontStyle: 'bold',
+        color: '#FFFFFF',
+        stroke: '#000000',
+        strokeThickness: 3
+      }).setOrigin(0, 0).setDepth(131);
+      this.debugScreenTexts.push(t);
+    }
+  }
+
+  setDebugOverlayVisible(visible) {
+    if (this.debugScreenGraphics) this.debugScreenGraphics.setVisible(visible);
+    this.debugScreenTexts.forEach(t => t.setVisible(visible));
+    this.debugObjectLabels.forEach(t => t.setVisible(visible));
+    if (this.debugPanelText) this.debugPanelText.setVisible(visible);
+  }
+
+  createDebugPanel() {
+    this.debugPanelText = this.add.text(12, 96, '', {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '12px',
+      color: '#FFFFFF',
+      backgroundColor: '#455A64',
+      padding: { x: 8, y: 6 }
+    }).setOrigin(0, 0).setDepth(140).setScrollFactor(0);
+  }
+
+  updateDebugPanel() {
+    if (!this.showDebugHitbox || !this.debugPanelText || !this.cameras || !this.cameras.main) return;
+    const view = this.cameras.main.worldView;
+    const approxScreen = Math.max(0, Math.floor((GAME_H - view.centerY) / GAME_H));
+    const inView = (obj) => obj && obj.active && obj.x >= view.x && obj.x <= view.right && obj.y >= view.y && obj.y <= view.bottom;
+
+    const woods = (this.woodGroup ? this.woodGroup.getChildren() : []).filter(inView).slice(0, 5).map(o => o.debugId || '?');
+    const balloons = (this.balloonGroup ? this.balloonGroup.getChildren() : []).filter(inView).slice(0, 6).map(o => o.debugId || '?');
+    const winds = (this.windGroup ? this.windGroup.getChildren() : []).filter(inView).slice(0, 4).map(o => o.debugId || '?');
+
+    this.debugPanelText.setText(
+      `画面: ${approxScreen}\n` +
+      `木: ${woods.join(', ') || '-'}\n` +
+      `風船: ${balloons.join(', ') || '-'}\n` +
+      `風: ${winds.join(', ') || '-'}`
+    );
+  }
+
+  rebuildDebugObjectLabels() {
+    if (!this.debugObjectLabels) this.debugObjectLabels = [];
+    this.debugObjectLabels.forEach(t => t.destroy());
+    this.debugObjectLabels = [];
+
+    if (this.woodGroup) {
+      this.woodGroup.getChildren().forEach(wood => {
+        if (!wood.active || !wood.debugId) return;
+        wood.debugLabel = this.createDebugObjectLabel(wood, wood.debugId, -40, '#00C853');
+      });
+    }
+    if (this.balloonGroup) {
+      this.balloonGroup.getChildren().forEach(balloon => {
+        if (!balloon.active || !balloon.debugId) return;
+        const suffix = balloon.kind === 'recover' ? 'R' : balloon.kind === 'warp' ? 'W' : 'N';
+        balloon.debugLabel = this.createDebugObjectLabel(balloon, `${balloon.debugId}-${suffix}`, -52, '#2979FF');
+      });
+    }
+    if (this.windGroup) {
+      this.windGroup.getChildren().forEach(zone => {
+        if (!zone.active || !zone.debugId) return;
+        zone.debugLabel = this.createDebugObjectLabel(zone, zone.debugId, -58, '#FDD835');
+      });
+    }
   }
 
   startFalling() {
@@ -1053,6 +1327,8 @@ class GameScene extends Phaser.Scene {
   // ---- 毎フレーム更新 ----
   update(time, delta) {
     this.drawDebugHitboxes();
+    this.updateDebugObjectLabels();
+    this.updateDebugPanel();
     this.updateMovingBalloons(time);
     if (!this.arrow || !this.isFlying) return;
 
@@ -1127,6 +1403,21 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  updateDebugObjectLabels() {
+    if (!this.showDebugHitbox || !this.debugObjectLabels) return;
+    for (let i = this.debugObjectLabels.length - 1; i >= 0; i--) {
+      const label = this.debugObjectLabels[i];
+      if (!label || !label.active) continue;
+      const target = label.debugTarget;
+      if (!target || !target.active) {
+        label.setVisible(false);
+        continue;
+      }
+      label.setVisible(true);
+      label.setPosition(target.x, target.y + (label.debugOffsetY || -42));
+    }
+  }
+
   drawDebugHitboxes() {
     if (!this.showDebugHitbox || !this.hitboxGraphics || !this.woodColliderGroup) return;
 
@@ -1184,6 +1475,7 @@ class GameOverScene extends Phaser.Scene {
 
   init(data) {
     this.finalScore = data.score || 0;
+    this.isClear = !!data.clear;
   }
 
   create() {
@@ -1200,7 +1492,7 @@ class GameOverScene extends Phaser.Scene {
     this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0xFFF0F5, 0.9);
 
     // タイトル
-    this.add.text(GAME_W / 2, GAME_H / 2 - 160, 'ゲームオーバー', {
+    this.add.text(GAME_W / 2, GAME_H / 2 - 160, this.isClear ? 'ゲームクリア' : 'ゲームオーバー', {
       fontFamily: "'M PLUS Rounded 1c'",
       fontSize: '36px',
       fontStyle: 'bold',
