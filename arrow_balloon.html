@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>弓矢バルーンサバイバル</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      touch-action: none;
+    }
+    body {
+      background: #FFF0F5;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      font-family: 'M PLUS Rounded 1c', sans-serif;
+    }
+    #game-container {
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+<div id="game-container"></div>
+
+<script>
+// ============================================================
+//  弓矢バルーンサバイバル
+//  仕様書: arrow_balloon_spec.md 参照
+//  開発フェーズ: Phase 1（コアサイクル）
+// ============================================================
+
+// ---- 定数 ----
+const GAME_W = 390;   // 画面幅（モバイル基準）
+const GAME_H = 844;   // 画面高さ（モバイル基準）
+const WALL_W = 16;    // 壁の幅
+const ARROW_SPEED_BASE = 800;   // 発射速度基準
+const ARROW_MAX_DRAG  = 120;    // 引っ張りの最大距離（px）
+const ARROW_RANGE_MAX = 1200;   // 最大飛距離
+const ARROW_RANGE_EXP = 1.5;    // 弱い引きで飛距離を短くする補正
+const FALL_GAMEOVER_DISTANCE = 220; // 落下開始後に許容する戻り距離
+const INITIAL_ARROWS  = 5;      // 初期矢の本数
+const WORLD_HEIGHT    = 6000;   // スクロール可能な世界の高さ
+const SHOW_DEBUG_HITBOX = false; // 当たり判定の可視化
+
+// ============================================================
+//  BootScene: アセット生成（テクスチャをコードで描画）
+// ============================================================
+class BootScene extends Phaser.Scene {
+  constructor() { super('Boot'); }
+
+  preload() {
+    // テクスチャをすべてGraphicsで生成（外部アセット不要）
+    this.createArrowTexture();
+    this.createWoodTexture();
+    this.createWoodPadTexture();
+    this.createBalloonTexture();
+    this.createWallTexture();
+  }
+
+  // 矢テクスチャ（先端が右向き、原点=先端）
+  createArrowTexture() {
+    const g = this.make.graphics({ x: 0, y: 0, add: false });
+    const w = 60, h = 12;
+    // 矢の軸
+    g.fillStyle(0x8B4513);
+    g.fillRect(0, h / 2 - 2, w - 16, 4);
+    // 矢じり（三角）
+    g.fillStyle(0xC0C0C0);
+    g.fillTriangle(w - 16, 0, w, h / 2, w - 16, h);
+    // 矢羽
+    g.fillStyle(0xFF6B9D);
+    g.fillTriangle(0, h / 2, 12, 0, 12, h / 2);
+    g.fillTriangle(0, h / 2, 12, h, 12, h / 2);
+    g.generateTexture('arrow', w, h);
+    g.destroy();
+  }
+
+  // 木オブジェクトテクスチャ（丸みのある横長の台）
+  createWoodTexture() {
+    const g = this.make.graphics({ x: 0, y: 0, add: false });
+    const w = 100, h = 40, r = 12;
+    // 影
+    g.fillStyle(0xC87941, 0.3);
+    g.fillRoundedRect(4, 4, w, h, r);
+    // 本体
+    g.fillStyle(0xDEB887);
+    g.fillRoundedRect(0, 0, w, h, r);
+    // 木目線
+    g.lineStyle(1.5, 0xC4A265, 0.5);
+    g.beginPath();
+    g.moveTo(20, 8);  g.lineTo(18, 32);
+    g.moveTo(40, 6);  g.lineTo(38, 34);
+    g.moveTo(60, 8);  g.lineTo(62, 32);
+    g.moveTo(80, 6);  g.lineTo(78, 34);
+    g.strokePath();
+    g.generateTexture('wood', w + 4, h + 4);
+    g.destroy();
+  }
+
+  createWoodPadTexture() {
+    const g = this.make.graphics({ x: 0, y: 0, add: false });
+    g.fillStyle(0xffffff, 1);
+    g.fillRect(0, 0, 8, 8);
+    g.generateTexture('wood_pad', 8, 8);
+    g.destroy();
+  }
+
+  // 風船テクスチャ（円形＋矢マーク）
+  createBalloonTexture() {
+    const colors = [0xFF6B9D, 0xFFB347, 0x87CEEB, 0x98FB98, 0xDDA0DD];
+    colors.forEach((color, i) => {
+      const g = this.make.graphics({ x: 0, y: 0, add: false });
+      const r = 36;
+      // 光沢
+      g.fillStyle(color, 0.9);
+      g.fillCircle(r, r, r);
+      g.fillStyle(0xFFFFFF, 0.35);
+      g.fillEllipse(r - 10, r - 12, 18, 12);
+      // 縦糸
+      g.lineStyle(2, 0xAAAAAA);
+      g.beginPath();
+      g.moveTo(r, r * 2);
+      g.lineTo(r, r * 2 + 20);
+      g.strokePath();
+      g.generateTexture(`balloon_${i}`, r * 2, r * 2 + 20);
+      g.destroy();
+    });
+  }
+
+  // 壁テクスチャ
+  createWallTexture() {
+    const g = this.make.graphics({ x: 0, y: 0, add: false });
+    g.fillStyle(0xFFB7C5);
+    g.fillRect(0, 0, WALL_W, 64);
+    // ドット模様
+    g.fillStyle(0xFFFFFF, 0.4);
+    for (let y = 4; y < 64; y += 16) {
+      g.fillCircle(WALL_W / 2, y, 3);
+    }
+    g.generateTexture('wall', WALL_W, 64);
+    g.destroy();
+  }
+
+  create() {
+    this.scene.start('Game');
+  }
+}
+
+// ============================================================
+//  GameScene: メインゲーム
+// ============================================================
+class GameScene extends Phaser.Scene {
+  constructor() { super('Game'); }
+
+  create() {
+    // ---- 世界の設定 ----
+    this.physics.world.setBounds(0, -WORLD_HEIGHT + GAME_H, GAME_W, WORLD_HEIGHT);
+    this.cameras.main.setBounds(0, -WORLD_HEIGHT + GAME_H, GAME_W, WORLD_HEIGHT);
+
+    // ---- ゲーム状態 ----
+    this.arrowCount = INITIAL_ARROWS; // 残り矢の本数
+    this.score      = 0;
+    this.isFlying   = false;          // 矢が飛行中か
+    this.isFalling  = false;          // 飛距離切れで落下中か
+    this.isDragging = false;          // スワイプ引っ張り中か
+    this.dragStart  = { x: 0, y: 0 };
+    this.flightDistanceLeft = 0;      // 残り飛距離
+    this.fallStartY = 0;              // 落下開始時のY
+    this.arrowColliders = [];         // 矢に紐づく衝突判定
+
+    // ---- 壁生成 ----
+    this.createWalls();
+
+    // ---- 木オブジェクト生成（初期配置） ----
+    this.woodGroup = this.physics.add.staticGroup();
+    this.woodColliderGroup = this.physics.add.staticGroup();
+    this.createInitialWoods();
+
+    // ---- 風船生成 ----
+    this.balloonGroup = this.physics.add.staticGroup();
+    this.createBalloons();
+
+    // ---- 矢の生成（最初の発射台から） ----
+    const firstWood = this.woodGroup.getChildren()[0];
+    this.currentAnchor = { x: firstWood.x, y: firstWood.y }; // 次の発射基準点
+    this.arrow = null;
+    this.spawnArrow();
+
+    // ---- カメラ設定 ----
+    this.cameras.main.startFollow(this.arrow, true, 0.1, 0.1);
+    this.cameras.main.setFollowOffset(0, GAME_H * 0.3); // 矢を画面下寄りに
+
+    // ---- UI（固定レイヤー） ----
+    this.createUI();
+
+    // ---- タッチ入力 ----
+    this.setupInput();
+
+    // ---- ドラッグ表示用Graphics ----
+    this.dragGraphics = this.add.graphics();
+    this.dragGraphics.setDepth(10);
+    this.dragGraphics.setScrollFactor(0);
+
+    // ---- デバッグ表示 ----
+    this.hitboxGraphics = this.add.graphics();
+    this.hitboxGraphics.setDepth(30);
+  }
+
+  // ---- 壁生成 ----
+  createWalls() {
+    this.walls = this.physics.add.staticGroup();
+    const tileH = 64;
+    const numTiles = Math.ceil(WORLD_HEIGHT / tileH) + 2;
+    for (let i = 0; i < numTiles; i++) {
+      const y = -WORLD_HEIGHT + GAME_H + i * tileH;
+      // 左壁
+      const wL = this.walls.create(WALL_W / 2, y, 'wall');
+      wL.setImmovable(true);
+      // 右壁
+      const wR = this.walls.create(GAME_W - WALL_W / 2, y, 'wall');
+      wR.setImmovable(true);
+    }
+  }
+
+  // ---- 木オブジェクト初期配置 ----
+  createInitialWoods() {
+    // 最初の台（画面下部中央）
+    const startY = GAME_H - 100;
+    this.addWood(GAME_W / 2, startY, { sx: 1.0, sy: 1.0 });
+
+    // 上方に間隔をあけて複数配置（Phase 1: 固定位置）
+    const positions = [
+      { x: GAME_W * 0.35, y: startY - 260 },
+      { x: GAME_W * 0.65, y: startY - 520 },
+      { x: GAME_W * 0.4,  y: startY - 780 },
+      { x: GAME_W * 0.6,  y: startY - 1040 },
+      { x: GAME_W * 0.3,  y: startY - 1300 },
+      { x: GAME_W * 0.7,  y: startY - 1560 },
+    ];
+    positions.forEach(p => this.addWood(p.x, p.y));
+  }
+
+  addWood(x, y, variant = null) {
+    const variants = [
+      { sx: 1.2,  sy: 0.95 }, // 横長
+      { sx: 1.0,  sy: 1.0  }, // 標準
+      { sx: 0.78, sy: 1.75 }, // 縦長寄り
+      { sx: 0.84, sy: 1.95 }, // 正方形寄り
+      { sx: 0.92, sy: 1.15 }, // 小さめ
+    ];
+    const v = variant || Phaser.Utils.Array.GetRandom(variants);
+    const wood = this.woodGroup.create(x, y, 'wood');
+    wood.setAngle(0);
+    wood.setScale(v.sx, v.sy);
+    wood.setImmovable(true);
+    wood.refreshBody();
+
+    // 当たり判定は別オブジェクトで管理
+    const collider = this.woodColliderGroup.create(x, y, 'wood_pad');
+    collider.setVisible(false);
+    collider.setImmovable(true);
+    collider.refreshBody();
+    const hitW = Math.round(104 * v.sx);
+    const hitH = Math.round(44 * v.sy);
+    collider.body.setSize(hitW, hitH, true);
+    wood.landingCollider = collider;
+    collider.parentWood = wood;
+    return wood;
+  }
+
+  // ---- 風船配置 ----
+  createBalloons() {
+    // Phase 1: コインライン状に配置（プレイヤーの通り道がわかる配置）
+    const startY = GAME_H - 350;
+    const routes = [
+      // ルート1: 左→右へ上昇
+      [
+        { x: 120, y: startY },
+        { x: 170, y: startY - 60 },
+        { x: 220, y: startY - 120 },
+        { x: 270, y: startY - 180 },
+      ],
+      // ルート2: 右側の風船群
+      [
+        { x: 260, y: startY - 320 },
+        { x: 230, y: startY - 380 },
+        { x: 200, y: startY - 440 },
+      ],
+      // ルート3
+      [
+        { x: 130, y: startY - 580 },
+        { x: 160, y: startY - 640 },
+        { x: 200, y: startY - 700 },
+        { x: 240, y: startY - 760 },
+        { x: 270, y: startY - 820 },
+      ],
+    ];
+
+    const points = [10, 20, 30, 50];
+    routes.forEach(route => {
+      route.forEach((pos, i) => {
+        this.addBalloon(pos.x, pos.y, points[i % points.length]);
+      });
+    });
+  }
+
+  addBalloon(x, y, point) {
+    const colorIdx = Phaser.Math.Between(0, 4);
+    const balloon = this.balloonGroup.create(x, y, `balloon_${colorIdx}`);
+    balloon.setImmovable(true);
+    balloon.refreshBody();
+    balloon.scoreValue = point;
+
+    // スコア数値テキスト
+    const text = this.add.text(x, y - 14, `+${point}`, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '16px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      stroke: '#FF6B9D',
+      strokeThickness: 3
+    }).setOrigin(0.5);
+    balloon.scoreText = text;
+
+    return balloon;
+  }
+
+  // ---- 矢のスポーン ----
+  spawnArrow() {
+    const wx = this.currentAnchor.x;
+    const wy = this.currentAnchor.y - 28; // 木の上に出現
+
+    if (this.arrow) this.arrow.destroy();
+
+    // 矢を物理ボディとして生成
+    // 原点を矢の先端（右端）に設定するため、offsetで調整
+    this.arrow = this.physics.add.image(wx, wy, 'arrow');
+    this.arrow.setOrigin(1.0, 0.5); // 原点=右端（先端）
+    this.arrow.setRotation(-Math.PI / 2); // 待機中は上向き
+    this.arrow.setCollideWorldBounds(false);
+    this.arrow.body.setAllowGravity(false);
+    this.arrow.setDepth(5);
+
+    this.isFlying   = false;
+    this.isFalling  = false;
+    this.isDragging = false;
+    this.flightDistanceLeft = 0;
+    this.fallStartY = 0;
+
+    // 矢の当たり判定を再設定（先端付近のみ）
+    this.arrow.body.setSize(20, 10);
+    // 原点=先端(this.arrow.x, this.arrow.y)に当たり判定中心を合わせる
+    this.arrow.body.setOffset(50, 1);
+
+    // カメラをリフレッシュ
+    this.cameras.main.startFollow(this.arrow, true, 0.08, 0.08);
+    this.cameras.main.setFollowOffset(0, GAME_H * 0.3);
+
+    // 新しい矢に衝突判定を再接続
+    this.setupCollisions();
+  }
+
+  // ---- 衝突判定設定 ----
+  setupCollisions() {
+    // 古い矢の衝突判定を掃除
+    this.arrowColliders.forEach(collider => collider.destroy());
+    this.arrowColliders = [];
+
+    // 風船
+    this.arrowColliders.push(this.physics.add.overlap(this.arrow, this.balloonGroup, (arrow, balloon) => {
+      this.hitBalloon(balloon);
+    }));
+
+    // 木に刺さる
+    this.arrowColliders.push(this.physics.add.overlap(this.arrow, this.woodColliderGroup, (arrow, woodCollider) => {
+      if (this.isFlying) {
+        const wood = woodCollider.parentWood;
+        if (wood && wood.active) {
+          this.stickToWood(wood);
+        }
+      }
+    }));
+  }
+
+  // ---- 入力設定 ----
+  setupInput() {
+    this.input.on('pointerdown', (ptr) => {
+      if (this.isFlying) return; // 飛行中はスワイプ不可
+      this.isDragging = true;
+      this.dragStart  = { x: ptr.x, y: ptr.y };
+    });
+
+    this.input.on('pointermove', (ptr) => {
+      if (!this.isDragging) return;
+      this.drawDragIndicator(ptr.x, ptr.y);
+    });
+
+    this.input.on('pointerup', (ptr) => {
+      if (!this.isDragging) return;
+      this.isDragging = false;
+      this.dragGraphics.clear();
+      this.fireArrow(ptr.x, ptr.y);
+    });
+  }
+
+  // ---- ドラッグインジケーター描画 ----
+  drawDragIndicator(px, py) {
+    this.dragGraphics.clear();
+
+    const dx = this.dragStart.x - px;
+    const dy = this.dragStart.y - py;
+    const dist = Math.min(Math.sqrt(dx * dx + dy * dy), ARROW_MAX_DRAG);
+
+    if (dist < 5) return;
+
+    // ゴム弓のような弧線
+    this.dragGraphics.lineStyle(3, 0xFF6B9D, 0.6);
+    this.dragGraphics.beginPath();
+    this.dragGraphics.moveTo(this.dragStart.x, this.dragStart.y);
+    this.dragGraphics.lineTo(px, py);
+    this.dragGraphics.strokePath();
+
+    // 発射方向の予測点線（Graphics#setLineDash非依存）
+    const arrowScreenX = this.arrow.x - this.cameras.main.scrollX;
+    const arrowScreenY = this.arrow.y - this.cameras.main.scrollY;
+
+    const angle = Math.atan2(dy, dx);
+    const power = dist / ARROW_MAX_DRAG;
+
+    const previewLen = 100 * power;
+    this.dragGraphics.fillStyle(0xFF6B9D, 0.35);
+    for (let d = 10; d <= previewLen; d += 14) {
+      this.dragGraphics.fillCircle(
+        arrowScreenX + Math.cos(angle) * d,
+        arrowScreenY + Math.sin(angle) * d,
+        3
+      );
+    }
+
+    // 点線の終端に方向矢印
+    const tipX = arrowScreenX + Math.cos(angle) * previewLen;
+    const tipY = arrowScreenY + Math.sin(angle) * previewLen;
+    const headLen = 14;
+    const wing = Math.PI / 7;
+    this.dragGraphics.lineStyle(3, 0xFF6B9D, 0.9);
+    this.dragGraphics.beginPath();
+    this.dragGraphics.moveTo(tipX, tipY);
+    this.dragGraphics.lineTo(
+      tipX - Math.cos(angle - wing) * headLen,
+      tipY - Math.sin(angle - wing) * headLen
+    );
+    this.dragGraphics.moveTo(tipX, tipY);
+    this.dragGraphics.lineTo(
+      tipX - Math.cos(angle + wing) * headLen,
+      tipY - Math.sin(angle + wing) * headLen
+    );
+    this.dragGraphics.strokePath();
+
+    // ドラッグ中は待機矢の角度も点線UIに合わせる
+    if (!this.isFlying && this.arrow) {
+      this.arrow.setRotation(angle);
+    }
+
+    // パワー円
+    this.dragGraphics.lineStyle(2, 0xFFB7C5, 0.5);
+    this.dragGraphics.strokeCircle(this.dragStart.x, this.dragStart.y, dist);
+  }
+
+  // ---- 矢を発射 ----
+  fireArrow(px, py) {
+    // 引っ張った逆方向に発射
+    const dx = this.dragStart.x - px;
+    const dy = this.dragStart.y - py;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 10) return; // 微小な入力は無視
+
+    const clampedDist = Math.min(dist, ARROW_MAX_DRAG);
+    const power  = clampedDist / ARROW_MAX_DRAG;
+    const angle  = Math.atan2(dy, dx); // 引っ張り逆方向
+
+    const vx = Math.cos(angle) * ARROW_SPEED_BASE * power;
+    const vy = Math.sin(angle) * ARROW_SPEED_BASE * power;
+
+    const rangePower = Math.pow(power, ARROW_RANGE_EXP);
+    this.flightDistanceLeft = Phaser.Math.Linear(0, ARROW_RANGE_MAX, rangePower);
+    this.isFalling = false;
+    this.arrow.body.setAllowGravity(false);
+    this.arrow.body.setVelocity(vx, vy);
+    this.arrow.setRotation(angle); // 飛行方向に矢を回転
+
+    this.isFlying   = true;
+    this.isDragging = false;
+  }
+
+  // ---- 壁反射 ----
+  reflectArrow(arrow, wall) {
+    const vx = arrow.body.velocity.x;
+    const vy = arrow.body.velocity.y;
+    // 左右壁 → X速度を反転
+    arrow.body.setVelocityX(-vx);
+    // 反射後の角度に矢を向ける
+    arrow.setRotation(Math.atan2(vy, -vx));
+  }
+
+  // ---- 風船ヒット ----
+  hitBalloon(balloon) {
+    // スコア加算
+    this.score += balloon.scoreValue;
+    this.updateScoreUI();
+
+    // エフェクト（スケールアップして消える）
+    this.tweens.add({
+      targets: balloon,
+      scaleX: 2,
+      scaleY: 2,
+      alpha: 0,
+      duration: 200,
+      onComplete: () => {
+        if (balloon.scoreText) balloon.scoreText.destroy();
+        balloon.destroy();
+      }
+    });
+
+    // ポップテキスト
+    const popText = this.add.text(balloon.x, balloon.y - 20, `+${balloon.scoreValue}`, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '24px',
+      fontStyle: 'bold',
+      color: '#FF6B9D',
+      stroke: '#FFFFFF',
+      strokeThickness: 4
+    }).setOrigin(0.5).setDepth(20);
+
+    this.tweens.add({
+      targets: popText,
+      y: balloon.y - 80,
+      alpha: 0,
+      duration: 600,
+      onComplete: () => popText.destroy()
+    });
+  }
+
+  // ---- 木に刺さる ----
+  stickToWood(wood) {
+    this.isFlying = false;
+    this.isFalling = false;
+    this.arrow.body.setVelocity(0, 0);
+    this.arrow.body.setAllowGravity(false);
+    this.currentAnchor = { x: wood.x, y: wood.y };
+    if (wood.landingCollider && wood.landingCollider.active) {
+      wood.landingCollider.destroy();
+    }
+    wood.destroy(); // 刺さった木は消す
+    this.arrowCount--;
+    this.updateArrowUI();
+
+    if (this.arrowCount <= 0) {
+      // ゲームオーバー
+      this.time.delayedCall(300, () => {
+        this.scene.start('GameOver', { score: this.score });
+      });
+    } else {
+      // 少し待って次の矢を準備
+      this.time.delayedCall(300, () => {
+        this.spawnArrow();
+      });
+    }
+  }
+
+  // ---- UI生成 ----
+  createUI() {
+    // スコア表示（右上）
+    this.scoreText = this.add.text(GAME_W - 20, 50, 'スコア: 0', {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '22px',
+      fontStyle: 'bold',
+      color: '#FF6B9D',
+      stroke: '#FFFFFF',
+      strokeThickness: 4,
+      align: 'right'
+    }).setOrigin(1, 0.5).setDepth(100).setScrollFactor(0);
+
+    // 矢UI（下部）
+    this.arrowIcons = [];
+    this.arrowUIContainer = this.add.container(0, GAME_H - 50).setDepth(100).setScrollFactor(0);
+    this.rebuildArrowUI();
+  }
+
+  updateScoreUI() {
+    this.scoreText.setText(`スコア: ${this.score}`);
+  }
+
+  rebuildArrowUI() {
+    this.arrowUIContainer.removeAll(true);
+    const spacing = 36;
+    const totalW  = this.arrowCount * spacing;
+    const startX  = (GAME_W - totalW) / 2 + spacing / 2;
+    for (let i = 0; i < this.arrowCount; i++) {
+      const icon = this.add.text(startX + i * spacing, 0, '🏹', {
+        fontSize: '26px'
+      }).setOrigin(0.5);
+      this.arrowUIContainer.add(icon);
+    }
+  }
+
+  updateArrowUI() {
+    this.rebuildArrowUI();
+  }
+
+  startFalling() {
+    if (this.isFalling) return;
+    this.isFalling = true;
+    this.fallStartY = this.arrow.y;
+    this.arrow.body.setAllowGravity(true);
+  }
+
+  // ---- 毎フレーム更新 ----
+  update(time, delta) {
+    this.drawDebugHitboxes();
+    if (!this.arrow || !this.isFlying) return;
+
+    const dt = delta / 1000;
+
+    // 飛距離を使い切ったら落下へ遷移
+    if (!this.isFalling) {
+      const speed = this.arrow.body.velocity.length();
+      this.flightDistanceLeft -= speed * dt;
+      if (this.flightDistanceLeft <= 0) {
+        this.startFalling();
+      }
+    }
+
+    // 原点=先端を使った左右壁の反射（見た目と判定を一致）
+    const tipX = this.arrow.x;
+    const vxNow = this.arrow.body.velocity.x;
+    const vyNow = this.arrow.body.velocity.y;
+    if (tipX <= WALL_W && vxNow < 0) {
+      this.arrow.x = WALL_W;
+      this.arrow.body.setVelocityX(Math.abs(vxNow));
+      this.arrow.setRotation(Math.atan2(vyNow, Math.abs(vxNow)));
+    } else if (tipX >= GAME_W - WALL_W && vxNow > 0) {
+      this.arrow.x = GAME_W - WALL_W;
+      this.arrow.body.setVelocityX(-Math.abs(vxNow));
+      this.arrow.setRotation(Math.atan2(vyNow, -Math.abs(vxNow)));
+    }
+
+    // 落下中は横速度を徐々に減らす
+    if (this.isFalling) {
+      this.arrow.body.setVelocityX(this.arrow.body.velocity.x * 0.985);
+    }
+
+    // 飛行中は速度方向に矢を向ける
+    const vx = this.arrow.body.velocity.x;
+    const vy = this.arrow.body.velocity.y;
+    if (Math.abs(vx) > 1 || Math.abs(vy) > 1) {
+      this.arrow.setRotation(Math.atan2(vy, vx));
+    }
+
+    // 落下中は、落下開始地点から一定距離戻ったらゲームオーバー
+    if (this.isFalling && this.arrow.y > this.fallStartY + FALL_GAMEOVER_DISTANCE) {
+      this.scene.start('GameOver', { score: this.score });
+      return;
+    }
+
+    // 念のため、画面下に大きく落ちた場合もゲームオーバー
+    if (this.arrow.y > this.cameras.main.scrollY + GAME_H + 100) {
+      this.scene.start('GameOver', { score: this.score });
+    }
+
+  }
+
+  drawDebugHitboxes() {
+    if (!SHOW_DEBUG_HITBOX || !this.hitboxGraphics || !this.woodColliderGroup) return;
+
+    this.hitboxGraphics.clear();
+    // 木の当たり判定（緑）
+    this.hitboxGraphics.lineStyle(2, 0x00c853, 0.95);
+    this.hitboxGraphics.fillStyle(0x00c853, 0.18);
+    this.woodColliderGroup.getChildren().forEach(collider => {
+      if (!collider.active || !collider.body) return;
+      const b = collider.body;
+      this.hitboxGraphics.fillRect(b.x, b.y, b.width, b.height);
+      this.hitboxGraphics.strokeRect(b.x, b.y, b.width, b.height);
+    });
+
+    // 矢の当たり判定（赤）
+    if (this.arrow && this.arrow.body) {
+      const b = this.arrow.body;
+      this.hitboxGraphics.lineStyle(2, 0xff1744, 0.95);
+      this.hitboxGraphics.fillStyle(0xff1744, 0.2);
+      this.hitboxGraphics.fillRect(b.x, b.y, b.width, b.height);
+      this.hitboxGraphics.strokeRect(b.x, b.y, b.width, b.height);
+    }
+  }
+}
+
+// ============================================================
+//  GameOverScene: ゲームオーバー画面
+// ============================================================
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOver'); }
+
+  init(data) {
+    this.finalScore = data.score || 0;
+  }
+
+  create() {
+    // ハイスコア保存
+    const best = parseInt(localStorage.getItem('arrow_balloon_best') || '0');
+    if (this.finalScore > best) {
+      localStorage.setItem('arrow_balloon_best', String(this.finalScore));
+    }
+    const bestScore = Math.max(best, this.finalScore);
+
+    // 背景
+    this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0xFFF0F5, 0.9);
+
+    // タイトル
+    this.add.text(GAME_W / 2, GAME_H / 2 - 160, 'ゲームオーバー', {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '36px',
+      fontStyle: 'bold',
+      color: '#FF6B9D',
+      stroke: '#FFFFFF',
+      strokeThickness: 5
+    }).setOrigin(0.5);
+
+    // スコア
+    this.add.text(GAME_W / 2, GAME_H / 2 - 60, `スコア: ${this.finalScore}`, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '28px',
+      color: '#FF6B9D'
+    }).setOrigin(0.5);
+
+    // ハイスコア
+    this.add.text(GAME_W / 2, GAME_H / 2 + 0, `ベスト: ${bestScore}`, {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '22px',
+      color: '#FFB7C5'
+    }).setOrigin(0.5);
+
+    // リトライボタン
+    const btn = this.add.text(GAME_W / 2, GAME_H / 2 + 100, 'もう一度 🏹', {
+      fontFamily: "'M PLUS Rounded 1c'",
+      fontSize: '28px',
+      fontStyle: 'bold',
+      color: '#FFFFFF',
+      backgroundColor: '#FF6B9D',
+      padding: { x: 30, y: 14 }
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+    btn.on('pointerdown', () => {
+      this.scene.start('Game');
+    });
+
+    btn.on('pointerover',  () => btn.setStyle({ backgroundColor: '#FF85B3' }));
+    btn.on('pointerout',   () => btn.setStyle({ backgroundColor: '#FF6B9D' }));
+  }
+}
+
+// ---- Phaser 設定（クラス定義後に初期化）----
+const config = {
+  type: Phaser.AUTO,
+  width:  GAME_W,
+  height: GAME_H,
+  parent: 'game-container',
+  backgroundColor: '#FFF0F5',
+  physics: {
+    default: 'arcade',
+    arcade: {
+      gravity: { y: 1200 }, // 落下フェーズで矢に重力を適用
+      debug: false
+    }
+  },
+  scene: [BootScene, GameScene, GameOverScene]
+};
+
+new Phaser.Game(config);
+</script>
+</body>
+</html>
