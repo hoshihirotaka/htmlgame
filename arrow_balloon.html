@@ -60,23 +60,23 @@ const WIND_ZONE_LAYOUT_STAGE1 = [
   { xRate: 0.32, yOffset: -900, dirX: 1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '右風・強' }
 ];
 const WIND_ZONE_LAYOUT_STAGE2 = [
-  { xRate: 0.22, yOffset: -260, dirX: 1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '右風・中' },
-  { xRate: 0.78, yOffset: -620, dirX: -1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '左風・強' },
-  { xRate: 0.48, yOffset: -980, dirX: 1, strength: WIND_STRENGTH_WEAK, key: 'wind_mark_weak', label: '右風・弱' }
+  { xRate: 0.50, yOffset: -124, dirX: 1, strength: WIND_STRENGTH_WEAK, key: 'wind_mark_weak', label: '右風・弱' },
+  { xRate: 0.40, yOffset: -1024, dirX: -1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '左風・中' },
+  { xRate: 0.55, yOffset: -2074, dirX: 1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '右風・強' }
 ];
 const WIND_ZONE_LAYOUT_STAGE3 = [
-  { xRate: 0.18, yOffset: -280, dirX: 1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '右風・強' },
-  { xRate: 0.82, yOffset: -540, dirX: -1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '左風・強' },
-  { xRate: 0.30, yOffset: -860, dirX: 1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '右風・中' },
-  { xRate: 0.70, yOffset: -1180, dirX: -1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '左風・中' }
+  { xRate: 0.30, yOffset: -274, dirX: 1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '右風・強' },
+  { xRate: 0.70, yOffset: -1124, dirX: -1, strength: WIND_STRENGTH_STRONG, key: 'wind_mark_strong', label: '左風・強' },
+  { xRate: 0.30, yOffset: -1824, dirX: 1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '右風・中' },
+  { xRate: 0.70, yOffset: -3224, dirX: -1, strength: WIND_STRENGTH_MID, key: 'wind_mark_mid', label: '左風・中' }
 ];
 const STAGE_COUNT = 3;
 const STAGE_CONFIGS = [
   { name: 'はじまりの森', depth: 5900 },
-  { name: 'かぜの回廊', depth: 5200 },
-  { name: 'よるぞらの塔', depth: 5600 }
+  { name: 'かぜの回廊', depth: 3700 },
+  { name: 'よるぞらの塔', depth: 4300 }
 ];
-const INITIAL_ARROWS  = 5;      // 初期矢の本数
+const INITIAL_ARROWS  = 7;      // 初期矢の本数
 const MAX_ARROWS = 9;           // 最大矢ストック
 const WORLD_HEIGHT    = 6000;   // スクロール可能な世界の高さ
 const ENABLE_DEBUG_UI = false;  // デバッグUI表示フラグ
@@ -461,51 +461,55 @@ class GameScene extends Phaser.Scene {
   }
 
   createStage2Woods() {
-    const startY = GAME_H - 100;
-    const topLimit = startY - (STAGE_CONFIGS[1]?.depth || 5200);
+    // かぜの回廊: ジグザグ配置、風との対話を学ぶステージ
+    // 12台、最短6着地（7矢で1本余裕）、安全ルートでも回復風船込みでクリア可能
     this.woodPath = [];
-    const addPathWood = (x, y, variant = null) => {
-      if (y < topLimit) return;
-      const clampedX = Phaser.Math.Clamp(x, 66, GAME_W - 66);
-      const wood = this.addWood(clampedX, y, variant);
-      this.woodPath.push({ x: clampedX, y, wood });
-    };
-    addPathWood(GAME_W / 2, startY, { sx: 1.0, sy: 1.0 });
-
-    let y = startY - 250;
-    let side = -1;
-    while (y > topLimit) {
-      const x1 = GAME_W * (side < 0 ? 0.24 : 0.76);
-      const x2 = GAME_W * (side < 0 ? 0.62 : 0.38);
-      addPathWood(x1, y);
-      addPathWood(x2, y - 260, { sx: 0.92, sy: 1.15 });
-      y -= 540;
-      side *= -1;
-    }
+    const layout = [
+      { x: GAME_W / 2, y: GAME_H - 100, v: { sx: 1.0, sy: 1.0 } }, // W0: 中央スタート
+      { x: 100, y: 440 },    // W1: 左
+      { x: 300, y: 160 },    // W2: 右、クロスショット
+      { x: 130, y: -130 },   // W3: 左寄り
+      { x: 270, y: -440 },   // W4: 右、風ゾーン付近
+      { x: 100, y: -780 },   // W5: 左端、壁反射チャンス
+      { x: 290, y: -1120 },  // W6: 右端
+      { x: 160, y: -1480 },  // W7: 中央左
+      { x: 310, y: -1820 },  // W8: 右端
+      { x: 100, y: -2140 },  // W9: 左端
+      { x: 250, y: -2500 },  // W10: 右寄り
+      { x: 180, y: -2860 },  // W11: 中央、ゴール
+    ];
+    layout.forEach((pos, i) => {
+      const clampedX = Phaser.Math.Clamp(pos.x, 66, GAME_W - 66);
+      const wood = this.addWood(clampedX, pos.y, pos.v || null);
+      this.woodPath.push({ x: clampedX, y: pos.y, wood });
+    });
     this.goalWood = this.woodPath[this.woodPath.length - 1]?.wood || null;
   }
 
   createStage3Woods() {
-    const startY = GAME_H - 100;
-    const topLimit = startY - (STAGE_CONFIGS[2]?.depth || 5600);
+    // よるぞらの塔: 左右に大きく振るジグザグ、精密射撃が求められる最終ステージ
+    // 13台、最短6着地（7矢でギリギリ）、風の影響が強い
     this.woodPath = [];
-    const addPathWood = (x, y, variant = null) => {
-      if (y < topLimit) return;
-      const clampedX = Phaser.Math.Clamp(x, 66, GAME_W - 66);
-      const wood = this.addWood(clampedX, y, variant);
-      this.woodPath.push({ x: clampedX, y, wood });
-    };
-    addPathWood(GAME_W / 2, startY, { sx: 1.0, sy: 1.0 });
-
-    let y = startY - 220;
-    let lane = 0;
-    while (y > topLimit) {
-      const x = [GAME_W * 0.18, GAME_W * 0.5, GAME_W * 0.82][lane % 3];
-      addPathWood(x, y);
-      if (lane % 2 === 0) addPathWood(GAME_W * 0.5, y - 210, { sx: 0.92, sy: 1.15 });
-      y -= 440;
-      lane++;
-    }
+    const layout = [
+      { x: GAME_W / 2, y: GAME_H - 100, v: { sx: 1.0, sy: 1.0 } }, // W0: 中央スタート
+      { x: 80, y: 420 },     // W1: 左端
+      { x: 310, y: 110 },    // W2: 右端、長い対角線
+      { x: 195, y: -200 },   // W3: 中央、休憩地点
+      { x: 80, y: -540 },    // W4: 左端
+      { x: 310, y: -880 },   // W5: 右端
+      { x: 195, y: -1220 },  // W6: 中央、休憩地点
+      { x: 80, y: -1600 },   // W7: 左端、大きめの隙間
+      { x: 310, y: -1960 },  // W8: 右端
+      { x: 195, y: -2300 },  // W9: 中央
+      { x: 80, y: -2680 },   // W10: 左端、大きめの隙間
+      { x: 310, y: -3060 },  // W11: 右端
+      { x: 195, y: -3400 },  // W12: 中央、ゴール
+    ];
+    layout.forEach((pos, i) => {
+      const clampedX = Phaser.Math.Clamp(pos.x, 66, GAME_W - 66);
+      const wood = this.addWood(clampedX, pos.y, pos.v || null);
+      this.woodPath.push({ x: clampedX, y: pos.y, wood });
+    });
     this.goalWood = this.woodPath[this.woodPath.length - 1]?.wood || null;
   }
 
@@ -634,24 +638,42 @@ class GameScene extends Phaser.Scene {
   }
 
   createStage2Balloons() {
-    const points = [15, 20, 30];
-    const bonus = [60, 80];
+    const points = [15, 20, 25];
+    const bonus = [50, 70];
     const path = this.woodPath || [];
     for (let i = 0; i < path.length - 1; i++) {
       const a = path[i], b = path[i + 1];
       const yMid = (a.y + b.y) * 0.5;
       const xMid = (a.x + b.x) * 0.5;
-      this.addBalloon(xMid, yMid - 20, points[i % points.length], 'fixed');
-      this.addBalloon(Phaser.Math.Linear(a.x, b.x, 0.35), yMid - 74, points[(i + 1) % points.length], 'updown');
-      this.addBalloon(Phaser.Math.Linear(a.x, b.x, 0.72), yMid - 118, points[(i + 2) % points.length], 'leftright');
+      const progress = i / Math.max(1, path.length - 1);
 
-      if (i % 4 === 1) {
-        const bx = (b.x < GAME_W * 0.5) ? GAME_W * 0.84 : GAME_W * 0.16;
-        this.addBalloon(bx, yMid - 64, bonus[i % bonus.length], 'updown');
+      // ルート風船（2個 + 中盤以降3個目）
+      this.addBalloon(
+        Phaser.Math.Linear(a.x, b.x, 0.33),
+        Phaser.Math.Linear(a.y, b.y, 0.33) - 20,
+        points[i % points.length],
+        progress < 0.3 ? 'fixed' : (i % 2 === 0 ? 'updown' : 'fixed')
+      );
+      this.addBalloon(
+        Phaser.Math.Linear(a.x, b.x, 0.66),
+        Phaser.Math.Linear(a.y, b.y, 0.66) - 20,
+        points[(i + 1) % points.length],
+        progress < 0.3 ? 'fixed' : (i % 2 === 1 ? 'leftright' : 'fixed')
+      );
+      if (progress >= 0.3) {
+        this.addBalloon(xMid, yMid - 50, points[(i + 2) % points.length], 'updown');
       }
-      if (i % 5 === 2) {
-        const rx = (a.x < GAME_W * 0.5) ? GAME_W * 0.72 : GAME_W * 0.28;
-        this.addBalloon(rx, yMid - 26, 0, 'fixed', { kind: 'recover' });
+
+      // ボーナス風船（端寄り、4セグメントごと）
+      if (i % 4 === 2) {
+        const bx = (b.x < GAME_W * 0.5) ? GAME_W * 0.82 : GAME_W * 0.18;
+        this.addBalloon(bx, yMid - 40, bonus[i % bonus.length], 'fixed');
+      }
+
+      // 回復風船（3セグメントごと → 全ルートで3-4個）
+      if (i % 3 === 1) {
+        const rx = Phaser.Math.Clamp(xMid + (b.x > a.x ? -60 : 60), 60, GAME_W - 60);
+        this.addBalloon(rx, yMid - 30, 0, 'fixed', { kind: 'recover' });
       }
     }
   }
@@ -664,18 +686,37 @@ class GameScene extends Phaser.Scene {
       const a = path[i], b = path[i + 1];
       const yMid = (a.y + b.y) * 0.5;
       const xMid = (a.x + b.x) * 0.5;
-      this.addBalloon(xMid, yMid - 18, points[i % points.length], 'leftright');
-      this.addBalloon(Phaser.Math.Linear(a.x, b.x, 0.28), yMid - 70, points[(i + 1) % points.length], 'updown');
-      this.addBalloon(Phaser.Math.Linear(a.x, b.x, 0.52), yMid - 126, points[(i + 2) % points.length], 'leftright');
-      this.addBalloon(Phaser.Math.Linear(a.x, b.x, 0.76), yMid - 176, points[i % points.length], 'updown');
 
-      if (i % 3 === 2) {
+      // 全セグメントに移動風船（最終ステージらしい難易度）
+      this.addBalloon(
+        Phaser.Math.Linear(a.x, b.x, 0.25),
+        Phaser.Math.Linear(a.y, b.y, 0.25) - 20,
+        points[i % points.length],
+        'leftright'
+      );
+      this.addBalloon(
+        Phaser.Math.Linear(a.x, b.x, 0.50),
+        yMid - 50,
+        points[(i + 1) % points.length],
+        'updown'
+      );
+      this.addBalloon(
+        Phaser.Math.Linear(a.x, b.x, 0.75),
+        Phaser.Math.Linear(a.y, b.y, 0.75) - 20,
+        points[(i + 2) % points.length],
+        i % 2 === 0 ? 'leftright' : 'updown'
+      );
+
+      // ボーナス風船（3セグメントごと、高得点だが端に配置）
+      if (i % 3 === 1) {
         const bx = (b.x < GAME_W * 0.5) ? GAME_W * 0.88 : GAME_W * 0.12;
-        this.addBalloon(bx, yMid - 96, bonus[i % bonus.length], 'leftright');
+        this.addBalloon(bx, yMid - 80, bonus[i % bonus.length], 'leftright');
       }
-      if (i % 7 === 4) {
-        const rx = (a.x < GAME_W * 0.5) ? GAME_W * 0.82 : GAME_W * 0.18;
-        this.addBalloon(rx, yMid - 36, 0, 'updown', { kind: 'recover' });
+
+      // 回復風船（4セグメントごと → 計3個、最終ステージは厳しめ）
+      if (i % 4 === 2) {
+        const rx = Phaser.Math.Clamp(xMid + (b.x > a.x ? -50 : 50), 60, GAME_W - 60);
+        this.addBalloon(rx, yMid - 30, 0, 'updown', { kind: 'recover' });
       }
     }
   }
@@ -1275,6 +1316,12 @@ class GameScene extends Phaser.Scene {
 
   // ---- 木に刺さる ----
   stickToWood(wood) {
+    // ゴール木に着地 → ステージクリア（矢を消費しない）
+    if (wood === this.goalWood) {
+      this.handleStageClear();
+      return;
+    }
+
     this.isFlying = false;
     this.isFalling = false;
     this.arrow.body.setVelocity(0, 0);
