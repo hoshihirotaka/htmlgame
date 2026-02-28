@@ -1,0 +1,1366 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>弓矢バルーン 検証ツール</title>
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;900&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #263238;
+      color: #ECEFF1;
+      font-family: 'M PLUS Rounded 1c', sans-serif;
+      font-size: 14px;
+    }
+    header {
+      background: #37474F;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      border-bottom: 2px solid #FF6B9D;
+    }
+    header h1 { font-size: 18px; color: #FF6B9D; white-space: nowrap; }
+    .stage-btn {
+      padding: 6px 16px;
+      border: 2px solid #546E7A;
+      background: transparent;
+      color: #B0BEC5;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .stage-btn:hover { border-color: #FFB7C5; color: #FFB7C5; }
+    .stage-btn.active { border-color: #FF6B9D; background: #FF6B9D; color: #fff; }
+    #controls { display: flex; gap: 8px; }
+    #arrow-type-select {
+      margin-left: 20px;
+      display: flex; gap: 6px; align-items: center;
+      color: #B0BEC5; font-size: 13px;
+    }
+    #arrow-type-select select {
+      padding: 4px 8px; border-radius: 4px;
+      background: #455A64; color: #ECEFF1; border: 1px solid #546E7A;
+      font-family: inherit;
+    }
+    main {
+      display: flex;
+      height: calc(100vh - 54px);
+    }
+    #canvas-container {
+      width: 420px;
+      min-width: 420px;
+      overflow-y: auto;
+      background: #1a1a2e;
+      border-right: 2px solid #455A64;
+    }
+    #canvas { display: block; }
+    #analysis-panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    .section {
+      background: #37474F;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .section h2 {
+      font-size: 16px;
+      color: #FFB7C5;
+      margin-bottom: 8px;
+      border-bottom: 1px solid #546E7A;
+      padding-bottom: 4px;
+    }
+    .section h3 {
+      font-size: 14px;
+      color: #80CBC4;
+      margin: 8px 0 4px 0;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 4px 8px;
+      border: 1px solid #546E7A;
+      text-align: center;
+    }
+    th { background: #455A64; color: #FFB7C5; }
+    .ok { color: #81C784; }
+    .warn { color: #FFB74D; }
+    .error { color: #EF5350; }
+    .path-highlight { background: #2E7D3244; }
+    .dead-end { background: #E5393544; }
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 16px;
+      font-size: 13px;
+    }
+    .info-grid dt { color: #90A4AE; }
+    .info-grid dd { color: #ECEFF1; font-weight: bold; }
+    .legend {
+      display: flex; gap: 16px; flex-wrap: wrap;
+      font-size: 12px; color: #90A4AE; margin-top: 8px;
+    }
+    .legend-item { display: flex; align-items: center; gap: 4px; }
+    .legend-color {
+      width: 14px; height: 14px; border-radius: 3px; border: 1px solid #546E7A;
+    }
+    #selected-wood-info {
+      background: #455A64;
+      border-radius: 6px;
+      padding: 10px;
+      margin-top: 8px;
+      font-size: 13px;
+      display: none;
+    }
+    .sweep-detail { margin: 4px 0; }
+    .progress-bar {
+      height: 4px;
+      background: #546E7A;
+      border-radius: 2px;
+      margin: 8px 0;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #FF6B9D;
+      border-radius: 2px;
+      transition: width 0.2s;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>弓矢バルーン 検証ツール</h1>
+  <div id="controls">
+    <button class="stage-btn active" onclick="selectStage(1)">STAGE 1</button>
+    <button class="stage-btn" onclick="selectStage(2)">STAGE 2</button>
+    <button class="stage-btn" onclick="selectStage(3)">STAGE 3</button>
+  </div>
+  <div id="arrow-type-select">
+    矢タイプ:
+    <select id="arrowType" onchange="rerunAnalysis()">
+      <option value="normal">ノーマル</option>
+      <option value="boost">ブースト</option>
+    </select>
+  </div>
+</header>
+
+<main>
+  <div id="canvas-container">
+    <canvas id="canvas"></canvas>
+  </div>
+  <div id="analysis-panel">
+    <div id="results">ステージを選択して解析を開始...</div>
+  </div>
+</main>
+
+<script>
+// ============================================================
+//  定数（ゲーム本体と同一）
+// ============================================================
+const GAME_W = 390;
+const GAME_H = 844;
+const WALL_W = 16;
+const ARROW_SPEED_BASE = 800;
+const ARROW_MAX_DRAG = 120;
+const ARROW_RANGE_MAX = 1200;
+const ARROW_RANGE_EXP = 1.5;
+const FALL_GAMEOVER_DISTANCE = 220;
+const WORLD_HEIGHT = 6000;
+const GRAVITY = 1200;
+const FALL_VX_DAMPING = 0.985;
+const INITIAL_ARROWS = 7;
+const MAX_ARROWS = 9;
+
+const WIND_STRENGTH_WEAK = 0.16;
+const WIND_STRENGTH_MID = 0.24;
+const WIND_STRENGTH_STRONG = 0.34;
+
+const STAGE_CONFIGS = [
+  { name: 'はじまりの森', depth: 5900 },
+  { name: 'かぜの回廊', depth: 3700 },
+  { name: 'よるぞらの塔', depth: 4300 }
+];
+
+const WIND_LAYOUTS = {
+  1: [
+    { xRate: 0.28, yOffset: -220, dirX: 1, strength: WIND_STRENGTH_WEAK, label: '右風・弱' },
+    { xRate: 0.72, yOffset: -520, dirX: -1, strength: WIND_STRENGTH_MID, label: '左風・中' },
+    { xRate: 0.32, yOffset: -900, dirX: 1, strength: WIND_STRENGTH_STRONG, label: '右風・強' }
+  ],
+  2: [
+    { xRate: 0.50, yOffset: -124, dirX: 1, strength: WIND_STRENGTH_WEAK, label: '右風・弱' },
+    { xRate: 0.40, yOffset: -1024, dirX: -1, strength: WIND_STRENGTH_MID, label: '左風・中' },
+    { xRate: 0.55, yOffset: -2074, dirX: 1, strength: WIND_STRENGTH_STRONG, label: '右風・強' }
+  ],
+  3: [
+    { xRate: 0.30, yOffset: -274, dirX: 1, strength: WIND_STRENGTH_STRONG, label: '右風・強' },
+    { xRate: 0.70, yOffset: -1124, dirX: -1, strength: WIND_STRENGTH_STRONG, label: '左風・強' },
+    { xRate: 0.30, yOffset: -1824, dirX: 1, strength: WIND_STRENGTH_MID, label: '右風・中' },
+    { xRate: 0.70, yOffset: -3224, dirX: -1, strength: WIND_STRENGTH_MID, label: '左風・中' }
+  ]
+};
+
+const ARROW_TYPES = {
+  normal: { speedMul: 1.0, rangeMul: 1.0, windMul: 1.0 },
+  boost:  { speedMul: 1.22, rangeMul: 1.18, windMul: 0.9 }
+};
+
+const WOOD_VARIANTS = [
+  { sx: 1.2,  sy: 0.95 },
+  { sx: 1.0,  sy: 1.0  },
+  { sx: 0.78, sy: 1.75 },
+  { sx: 0.84, sy: 1.95 },
+  { sx: 0.92, sy: 1.15 }
+];
+
+// ============================================================
+//  ユーティリティ
+// ============================================================
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function rectsOverlap(r1, r2) {
+  return r1.x < r2.x + r2.w && r1.x + r1.w > r2.x &&
+         r1.y < r2.y + r2.h && r1.y + r1.h > r2.y;
+}
+
+// 矢先端の当たり判定矩形（ゲーム準拠: 20x10, 先端中心）
+function arrowHitRect(tipX, tipY) {
+  return { x: tipX - 10, y: tipY - 5, w: 20, h: 10 };
+}
+
+// ============================================================
+//  ステージデータ生成（ゲーム本体のロジックを忠実に再現）
+// ============================================================
+function generateStageData(stageIndex) {
+  let woodSpawnIndex = 0;
+  const woods = [];
+  const balloons = [];
+  let balloonId = 1;
+
+  function addWood(x, y, variant) {
+    const v = variant || WOOD_VARIANTS[woodSpawnIndex % WOOD_VARIANTS.length];
+    woodSpawnIndex++;
+    const cx = clamp(x, 66, GAME_W - 66);
+    const displayW = 104 * v.sx;
+    const displayH = 44 * v.sy;
+    const hitW = Math.round(displayW);
+    const hitH = Math.round(displayH * 0.5);
+    const id = woods.length;
+    woods.push({
+      id,
+      x: cx, y,
+      variant: v,
+      displayW, displayH,
+      hitbox: {
+        x: cx - hitW / 2,
+        y: y - displayH / 2,
+        w: hitW,
+        h: hitH
+      }
+    });
+    return woods[woods.length - 1];
+  }
+
+  function addBalloon(x, y, point, moveType, options) {
+    const opts = options || {};
+    const kind = opts.kind || 'normal';
+    const bx = clamp(x, 40, GAME_W - 40);
+    // 風船ヒットボックス: 52x52, テクスチャ72x92の中心からオフセット(10,10)
+    // → body center ≈ (bx, by - 10)
+    balloons.push({
+      id: balloonId++,
+      x: bx, y, kind, moveType: moveType || 'fixed',
+      scoreValue: (kind === 'recover' || kind === 'warp') ? 0 : point,
+      hitbox: {
+        x: bx - 26, y: y - 36,
+        w: 52, h: 52
+      }
+    });
+  }
+
+  // --- ステージ別の木配置 ---
+  const startY = GAME_H - 100; // = 744
+
+  if (stageIndex === 1) {
+    const stageDepth = STAGE_CONFIGS[0].depth;
+    const topLimit = -WORLD_HEIGHT + GAME_H + 120;
+    const totalSpan = startY - topLimit;
+    const screenCount = Math.ceil(totalSpan / GAME_H);
+
+    addWood(GAME_W / 2, startY, { sx: 1.0, sy: 1.0 });
+
+    for (let s = 0; s < screenCount; s++) {
+      const screenBottom = startY - s * GAME_H;
+      const leftX = GAME_W * 0.24;
+      const midX = GAME_W * 0.5;
+      const rightX = GAME_W * 0.76;
+      const primaryX = (s % 2 === 0) ? leftX : rightX;
+      const secondaryX = (s % 2 === 0) ? rightX : leftX;
+      const y1 = screenBottom - GAME_H * 0.34;
+      const y2 = screenBottom - GAME_H * 0.68;
+
+      if (y1 >= topLimit) addWood(primaryX, y1);
+      if (s % 2 === 1 && y2 >= topLimit) {
+        addWood(secondaryX, y2);
+      } else if (s % 4 === 0 && y2 >= topLimit) {
+        addWood(midX, y2, { sx: 0.92, sy: 1.15 });
+      }
+
+      if (screenBottom - GAME_H < topLimit) break;
+    }
+  } else if (stageIndex === 2) {
+    // かぜの回廊: ジグザグ配置
+    const layout2 = [
+      { x: GAME_W / 2, y: startY, v: { sx: 1.0, sy: 1.0 } },
+      { x: 100, y: 440 },   { x: 300, y: 160 },
+      { x: 130, y: -130 },  { x: 270, y: -440 },
+      { x: 100, y: -780 },  { x: 290, y: -1120 },
+      { x: 160, y: -1480 }, { x: 310, y: -1820 },
+      { x: 100, y: -2140 }, { x: 250, y: -2500 },
+      { x: 180, y: -2860 }
+    ];
+    layout2.forEach(pos => addWood(pos.x, pos.y, pos.v || null));
+  } else { // Stage 3
+    // よるぞらの塔: 左右に大きく振るジグザグ
+    const layout3 = [
+      { x: GAME_W / 2, y: startY, v: { sx: 1.0, sy: 1.0 } },
+      { x: 80, y: 420 },    { x: 310, y: 110 },
+      { x: 195, y: -200 },  { x: 80, y: -540 },
+      { x: 310, y: -880 },  { x: 195, y: -1220 },
+      { x: 80, y: -1600 },  { x: 310, y: -1960 },
+      { x: 195, y: -2300 }, { x: 80, y: -2680 },
+      { x: 310, y: -3060 }, { x: 195, y: -3400 }
+    ];
+    layout3.forEach(pos => addWood(pos.x, pos.y, pos.v || null));
+  }
+
+  // ゴール木 = 最後の木
+  const goalWood = woods[woods.length - 1];
+
+  // ゴールマーカー
+  const gx = goalWood.x;
+  const gy = goalWood.y - 104;
+  // goal_marker テクスチャ 78x92, body.setSize(28,72,true), setOffset(0,8)
+  const goal = {
+    x: gx, y: gy,
+    hitbox: {
+      x: gx - 39,
+      y: gy - 46 + 8,
+      w: 28,
+      h: 72
+    }
+  };
+
+  // --- 風ゾーン ---
+  const windStartY = GAME_H - 420;
+  const windLayout = WIND_LAYOUTS[stageIndex];
+  const winds = windLayout.map(w => ({
+    x: GAME_W * w.xRate,
+    y: windStartY + w.yOffset,
+    dirX: w.dirX,
+    strength: w.strength,
+    label: w.label,
+    hitbox: {
+      x: GAME_W * w.xRate - 54,
+      y: windStartY + w.yOffset - 32,
+      w: 108,
+      h: 64
+    }
+  }));
+
+  // --- 風船配置 ---
+  if (stageIndex === 1) {
+    generateStage1Balloons(woods, addBalloon);
+  } else if (stageIndex === 2) {
+    generateStage2Balloons(woods, addBalloon);
+  } else {
+    generateStage3Balloons(woods, addBalloon);
+  }
+
+  return { woods, balloons, winds, goal, stageIndex };
+}
+
+function generateStage1Balloons(path, addBalloon) {
+  const routePoints = [10, 15, 20];
+  const bonusPoints = [50, 70];
+  if (path.length < 2) return;
+  const startY = path[0].y;
+  const endY = path[path.length - 1].y;
+  const total = Math.max(1, startY - endY);
+  let pointIdx = 0;
+  const recoverPlacedScreens = new Set();
+
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1];
+    const progress = clamp((startY - a.y) / total, 0, 1);
+    const absDx = Math.abs(b.x - a.x);
+    const phase = progress < 0.10 ? 'tutorial' : progress < 0.50 ? 'mid' : 'late';
+    const centerY = (a.y + b.y) * 0.5;
+    const screenIdx = Math.max(0, Math.floor((startY - centerY) / GAME_H));
+
+    const counts = phase === 'tutorial' ? 3 : 4;
+    for (let k = 1; k <= counts; k++) {
+      const t = k / (counts + 1);
+      const x = lerp(a.x, b.x, t);
+      const y = lerp(a.y, b.y, t) - (phase === 'tutorial' ? 18 : 22);
+      let moveType = 'fixed';
+      if (phase === 'mid' && k >= 3) moveType = (k % 2 === 0) ? 'updown' : 'fixed';
+      if (phase === 'late') moveType = (k % 2 === 0) ? 'leftright' : 'updown';
+      addBalloon(x, y, routePoints[(pointIdx + k) % routePoints.length], moveType);
+      pointIdx++;
+    }
+
+    if (phase !== 'tutorial' && absDx < 46 && i % 2 === 0) {
+      const wallX = (a.x < GAME_W * 0.5) ? GAME_W - 56 : 56;
+      const wallY = centerY - 40;
+      addBalloon(wallX, wallY, bonusPoints[(i / 2) % bonusPoints.length], phase === 'mid' ? 'fixed' : 'leftright');
+    }
+
+    if (phase === 'mid' && i % 7 === 3) {
+      const bx = (b.x < GAME_W * 0.5) ? GAME_W * 0.82 : GAME_W * 0.18;
+      addBalloon(bx, centerY - 90, bonusPoints[i % bonusPoints.length], 'fixed');
+    }
+    if (phase === 'late' && i % 6 === 2) {
+      const bx = (b.x < GAME_W * 0.5) ? GAME_W * 0.88 : GAME_W * 0.12;
+      addBalloon(bx, centerY - 100, bonusPoints[(i + 1) % bonusPoints.length], 'updown');
+    }
+
+    if (!recoverPlacedScreens.has(screenIdx)) {
+      let rx = clamp((a.x + b.x) * 0.5, 82, GAME_W - 82);
+      let moveType = 'fixed';
+      if (phase === 'mid') rx = (b.x < GAME_W * 0.5) ? GAME_W * 0.74 : GAME_W * 0.26;
+      if (phase === 'late') {
+        rx = (b.x < GAME_W * 0.5) ? GAME_W * 0.80 : GAME_W * 0.20;
+        moveType = 'updown';
+      }
+      addBalloon(rx, centerY - 30, 0, moveType, { kind: 'recover' });
+      recoverPlacedScreens.add(screenIdx);
+    }
+  }
+}
+
+function generateStage2Balloons(path, addBalloon) {
+  const points = [15, 20, 25];
+  const bonus = [50, 70];
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1];
+    const yMid = (a.y + b.y) * 0.5;
+    const xMid = (a.x + b.x) * 0.5;
+    const progress = i / Math.max(1, path.length - 1);
+    addBalloon(lerp(a.x, b.x, 0.33), lerp(a.y, b.y, 0.33) - 20,
+      points[i % points.length], progress < 0.3 ? 'fixed' : (i % 2 === 0 ? 'updown' : 'fixed'));
+    addBalloon(lerp(a.x, b.x, 0.66), lerp(a.y, b.y, 0.66) - 20,
+      points[(i + 1) % points.length], progress < 0.3 ? 'fixed' : (i % 2 === 1 ? 'leftright' : 'fixed'));
+    if (progress >= 0.3) {
+      addBalloon(xMid, yMid - 50, points[(i + 2) % points.length], 'updown');
+    }
+    if (i % 4 === 2) {
+      const bx = (b.x < GAME_W * 0.5) ? GAME_W * 0.82 : GAME_W * 0.18;
+      addBalloon(bx, yMid - 40, bonus[i % bonus.length], 'fixed');
+    }
+    if (i % 3 === 1) {
+      const rx = clamp(xMid + (b.x > a.x ? -60 : 60), 60, GAME_W - 60);
+      addBalloon(rx, yMid - 30, 0, 'fixed', { kind: 'recover' });
+    }
+  }
+}
+
+function generateStage3Balloons(path, addBalloon) {
+  const points = [20, 30, 40];
+  const bonus = [70, 90];
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1];
+    const yMid = (a.y + b.y) * 0.5;
+    const xMid = (a.x + b.x) * 0.5;
+    addBalloon(lerp(a.x, b.x, 0.25), lerp(a.y, b.y, 0.25) - 20,
+      points[i % points.length], 'leftright');
+    addBalloon(lerp(a.x, b.x, 0.50), yMid - 50,
+      points[(i + 1) % points.length], 'updown');
+    addBalloon(lerp(a.x, b.x, 0.75), lerp(a.y, b.y, 0.75) - 20,
+      points[(i + 2) % points.length], i % 2 === 0 ? 'leftright' : 'updown');
+    if (i % 3 === 1) {
+      const bx = (b.x < GAME_W * 0.5) ? GAME_W * 0.88 : GAME_W * 0.12;
+      addBalloon(bx, yMid - 80, bonus[i % bonus.length], 'leftright');
+    }
+    if (i % 4 === 2) {
+      const rx = clamp(xMid + (b.x > a.x ? -50 : 50), 60, GAME_W - 60);
+      addBalloon(rx, yMid - 30, 0, 'updown', { kind: 'recover' });
+    }
+  }
+}
+
+// ============================================================
+//  物理シミュレーション
+// ============================================================
+function simulateShot(startX, startY, angle, power, arrowType, stageData, skipWoodIds) {
+  const config = ARROW_TYPES[arrowType] || ARROW_TYPES.normal;
+
+  let vx = Math.cos(angle) * ARROW_SPEED_BASE * power * config.speedMul;
+  let vy = Math.sin(angle) * ARROW_SPEED_BASE * power * config.speedMul;
+  const rangePower = Math.pow(power, ARROW_RANGE_EXP);
+  let flightDistLeft = rangePower * ARROW_RANGE_MAX * config.rangeMul;
+
+  let tipX = startX;
+  let tipY = startY - 28; // 木の上にスポーン
+  let falling = false;
+  let fallStartY = 0;
+
+  const trajectory = [{ x: tipX, y: tipY }];
+  const hitBalloons = [];
+  const hitBalloonSet = new Set();
+  let landedWood = null;
+  let hitGoal = false;
+
+  const dt = 1 / 60;
+  const maxSteps = 600; // 最大10秒
+
+  for (let step = 0; step < maxSteps; step++) {
+    // 飛距離トラッキング
+    if (!falling) {
+      const speed = Math.sqrt(vx * vx + vy * vy);
+      flightDistLeft -= speed * dt;
+      if (flightDistLeft <= 0) {
+        falling = true;
+        fallStartY = tipY;
+      }
+    }
+
+    // 風の適用（飛行中・落下中どちらも）
+    for (const wind of stageData.winds) {
+      if (rectsOverlap(arrowHitRect(tipX, tipY), wind.hitbox)) {
+        const speed = Math.max(260, Math.sqrt(vx * vx + vy * vy));
+        const targetVx = wind.dirX * speed;
+        const eff = wind.strength * config.windMul;
+        vx = lerp(vx, targetVx, eff);
+        vy = vy * (1 - eff * 0.35);
+      }
+    }
+
+    // 重力（落下中のみ）
+    if (falling) {
+      vy += GRAVITY * dt;
+      vx *= FALL_VX_DAMPING;
+    }
+
+    // 移動
+    tipX += vx * dt;
+    tipY += vy * dt;
+
+    // 壁反射
+    if (tipX <= WALL_W && vx < 0) {
+      tipX = WALL_W;
+      vx = Math.abs(vx);
+    } else if (tipX >= GAME_W - WALL_W && vx > 0) {
+      tipX = GAME_W - WALL_W;
+      vx = -Math.abs(vx);
+    }
+
+    trajectory.push({ x: tipX, y: tipY });
+
+    const aRect = arrowHitRect(tipX, tipY);
+
+    // 風船ヒットチェック
+    for (const b of stageData.balloons) {
+      if (hitBalloonSet.has(b.id)) continue;
+      if (rectsOverlap(aRect, b.hitbox)) {
+        hitBalloonSet.add(b.id);
+        hitBalloons.push(b);
+      }
+    }
+
+    // 木ヒットチェック（発射元は除外）
+    for (const w of stageData.woods) {
+      if (skipWoodIds && skipWoodIds.has(w.id)) continue;
+      if (rectsOverlap(aRect, w.hitbox)) {
+        landedWood = w;
+        break;
+      }
+    }
+    if (landedWood) break;
+
+    // ゴールヒットチェック
+    if (stageData.goal && rectsOverlap(aRect, stageData.goal.hitbox)) {
+      hitGoal = true;
+      break;
+    }
+
+    // ゲームオーバー判定
+    if (falling && tipY > fallStartY + FALL_GAMEOVER_DISTANCE) break;
+    if (tipY > GAME_H + 300) break;
+    // 上に飛びすぎた場合（通常ありえないが安全弁）
+    if (tipY < -WORLD_HEIGHT) break;
+  }
+
+  return { trajectory, hitBalloons, landedWood, hitGoal, success: !!landedWood || hitGoal };
+}
+
+// ============================================================
+//  到達可能性分析
+// ============================================================
+function analyzeReachability(stageData, arrowType) {
+  const woods = stageData.woods;
+  const n = woods.length;
+
+  // 各木から到達可能な木 + ゴールを探索
+  // sweepパラメータ
+  const angleSteps = 90;  // -170° ～ -10°
+  const powerSteps = 20;  // 0.10 ～ 1.0
+  const angleMin = -170 * Math.PI / 180;
+  const angleMax = -10 * Math.PI / 180;
+  const powerMin = 0.10;
+  const powerMax = 1.0;
+
+  // reachability[i] = [{ targetId, angle, power, balloons, score }]
+  const reachability = new Array(n).fill(null).map(() => []);
+  // canReachGoal[i] = { angle, power, balloons, score } or null
+  const canReachGoal = new Array(n).fill(null);
+  // bestTrajectories[i][j] = trajectory for best path from i to j
+  const bestTrajectories = {};
+
+  for (let i = 0; i < n; i++) {
+    const w = woods[i];
+    const skipIds = new Set([w.id]);
+    const reachedTargets = new Map(); // targetId → best result
+
+    for (let ai = 0; ai <= angleSteps; ai++) {
+      const angle = lerp(angleMin, angleMax, ai / angleSteps);
+      for (let pi = 0; pi <= powerSteps; pi++) {
+        const power = lerp(powerMin, powerMax, pi / powerSteps);
+        const result = simulateShot(w.x, w.y, angle, power, arrowType, stageData, skipIds);
+
+        if (result.hitGoal) {
+          const score = result.hitBalloons.reduce((s, b) => s + b.scoreValue, 0);
+          if (!canReachGoal[i] || score > canReachGoal[i].score) {
+            canReachGoal[i] = { angle, power, balloons: result.hitBalloons, score, trajectory: result.trajectory };
+          }
+        }
+
+        if (result.landedWood) {
+          const tid = result.landedWood.id;
+          const score = result.hitBalloons.reduce((s, b) => s + b.scoreValue, 0);
+          const recoveries = result.hitBalloons.filter(b => b.kind === 'recover').length;
+          const prev = reachedTargets.get(tid);
+          // スコア優先、同スコアなら回復優先
+          if (!prev || score > prev.score || (score === prev.score && recoveries > prev.recoveries)) {
+            reachedTargets.set(tid, {
+              targetId: tid,
+              angle, power, score, recoveries,
+              balloons: result.hitBalloons,
+              trajectory: result.trajectory
+            });
+          }
+        }
+      }
+    }
+
+    reachability[i] = Array.from(reachedTargets.values());
+  }
+
+  return { reachability, canReachGoal };
+}
+
+// 最短経路探索（BFS）
+function findShortestPath(stageData, reachability, canReachGoal) {
+  const n = stageData.woods.length;
+  if (n === 0) return null;
+
+  // BFS: 開始=wood[0], 目的=goal
+  const queue = [{ woodId: 0, path: [0], arrows: INITIAL_ARROWS, recoveries: 0, score: 0 }];
+  const visited = new Map(); // woodId → min arrows used
+  visited.set(0, 0);
+
+  let bestResult = null;
+
+  while (queue.length > 0) {
+    const curr = queue.shift();
+    const arrowsUsed = curr.path.length - 1;
+
+    // ゴールへ直接到達可能？
+    if (canReachGoal[curr.woodId]) {
+      const totalArrows = arrowsUsed + 1;
+      const totalScore = curr.score + canReachGoal[curr.woodId].score;
+      if (!bestResult || totalArrows < bestResult.arrowsUsed ||
+          (totalArrows === bestResult.arrowsUsed && totalScore > bestResult.score)) {
+        bestResult = {
+          path: [...curr.path, 'GOAL'],
+          arrowsUsed: totalArrows,
+          score: totalScore,
+          recoveries: curr.recoveries + canReachGoal[curr.woodId].balloons.filter(b => b.kind === 'recover').length
+        };
+      }
+    }
+
+    // 次の木へ
+    for (const reach of reachability[curr.woodId]) {
+      const nextArrows = arrowsUsed + 1;
+      // 既にもっと少ない矢数で訪問済みならスキップ
+      const prevBest = visited.get(reach.targetId);
+      if (prevBest !== undefined && prevBest <= nextArrows) continue;
+      visited.set(reach.targetId, nextArrows);
+
+      // 矢の予算チェック（回復込み）
+      const totalRecoveries = curr.recoveries + reach.recoveries;
+      const arrowBudget = INITIAL_ARROWS + totalRecoveries;
+      if (nextArrows >= arrowBudget + 3) continue; // 余裕を持って枝刈り
+
+      queue.push({
+        woodId: reach.targetId,
+        path: [...curr.path, reach.targetId],
+        arrows: arrowBudget - nextArrows,
+        recoveries: totalRecoveries,
+        score: curr.score + reach.score
+      });
+    }
+  }
+
+  return bestResult;
+}
+
+// デッドエンド検出
+function findDeadEnds(stageData, reachability, canReachGoal) {
+  const deadEnds = [];
+  for (let i = 0; i < stageData.woods.length; i++) {
+    // 上方向（y が小さい方）への到達先がない かつ ゴールにも届かない
+    const upwardReach = reachability[i].filter(r => {
+      const targetWood = stageData.woods[r.targetId];
+      return targetWood.y < stageData.woods[i].y;
+    });
+    if (upwardReach.length === 0 && !canReachGoal[i]) {
+      deadEnds.push(i);
+    }
+  }
+  return deadEnds;
+}
+
+// 角度範囲分析（各遷移がどの程度の精度を要求するか）
+function analyzeAngleMargins(reachability, stageData) {
+  const margins = [];
+  for (let i = 0; i < stageData.woods.length; i++) {
+    // 上方向の到達先の中で、最も角度範囲が狭い遷移を特定
+    const upward = reachability[i].filter(r => stageData.woods[r.targetId].y < stageData.woods[i].y);
+    if (upward.length === 0) {
+      margins.push({ woodId: i, narrowest: null, totalReachable: 0 });
+      continue;
+    }
+
+    // 各到達先ごとに成功する角度・パワーの組み合わせ数を数える（sweep結果から推定）
+    margins.push({
+      woodId: i,
+      totalReachable: upward.length,
+      targets: upward.map(r => ({
+        targetId: r.targetId,
+        angle: r.angle,
+        power: r.power
+      }))
+    });
+  }
+  return margins;
+}
+
+// ============================================================
+//  Canvas描画
+// ============================================================
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let currentStageData = null;
+let currentAnalysis = null;
+let selectedWoodId = null;
+let displayTrajectories = [];
+
+function setupCanvas(stageData) {
+  const minY = Math.min(stageData.goal.y - 60, ...stageData.woods.map(w => w.y));
+  const maxY = Math.max(GAME_H, ...stageData.woods.map(w => w.y)) + 60;
+  const worldH = maxY - minY;
+
+  // キャンバスを世界座標と1:1にする（パディング付き）
+  const scale = 1.0;
+  canvas.width = GAME_W * scale + 20;
+  canvas.height = worldH * scale + 40;
+  canvas._worldMinY = minY;
+  canvas._worldMaxY = maxY;
+  canvas._scale = scale;
+}
+
+function worldToCanvas(wx, wy) {
+  const s = canvas._scale;
+  return {
+    x: wx * s + 10,
+    y: (wy - canvas._worldMinY) * s + 20
+  };
+}
+
+function drawStage(stageData, analysis) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  // 背景
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, w, h);
+
+  // 壁
+  ctx.fillStyle = '#FFB7C544';
+  const leftWall = worldToCanvas(0, canvas._worldMinY);
+  const rightWall = worldToCanvas(GAME_W - WALL_W, canvas._worldMinY);
+  ctx.fillRect(leftWall.x, leftWall.y, WALL_W, h);
+  ctx.fillRect(rightWall.x, rightWall.y, WALL_W, h);
+
+  // 画面境界線
+  ctx.strokeStyle = '#ffffff15';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 8]);
+  for (let sy = Math.ceil(canvas._worldMinY / GAME_H) * GAME_H; sy <= canvas._worldMaxY; sy += GAME_H) {
+    const p = worldToCanvas(0, sy);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x + GAME_W, p.y);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // 風ゾーン
+  for (const wind of stageData.winds) {
+    const p = worldToCanvas(wind.x, wind.y);
+    ctx.fillStyle = wind.strength >= WIND_STRENGTH_STRONG ? '#FDD83530' :
+                    wind.strength >= WIND_STRENGTH_MID ? '#FDD83520' : '#FDD83515';
+    ctx.strokeStyle = '#FDD83580';
+    ctx.lineWidth = 1.5;
+    const hw = worldToCanvas(wind.hitbox.x, wind.hitbox.y);
+    ctx.fillRect(hw.x, hw.y, wind.hitbox.w, wind.hitbox.h);
+    ctx.strokeRect(hw.x, hw.y, wind.hitbox.w, wind.hitbox.h);
+
+    // 方向矢印
+    ctx.fillStyle = '#FDD835AA';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(wind.dirX > 0 ? '→' : '←', p.x, p.y + 4);
+    ctx.font = '10px sans-serif';
+    ctx.fillText(wind.label, p.x, p.y + 18);
+  }
+
+  // 風船
+  for (const b of stageData.balloons) {
+    const p = worldToCanvas(b.x, b.y);
+    const r = 8;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    if (b.kind === 'recover') {
+      ctx.fillStyle = '#9CCC6580';
+      ctx.strokeStyle = '#9CCC65';
+    } else if (b.kind === 'warp') {
+      ctx.fillStyle = '#8C9EFF80';
+      ctx.strokeStyle = '#8C9EFF';
+    } else {
+      ctx.fillStyle = '#FF6B9D50';
+      ctx.strokeStyle = '#FF6B9D80';
+    }
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    if (b.scoreValue > 0) {
+      ctx.fillStyle = '#ffffff90';
+      ctx.font = '8px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${b.scoreValue}`, p.x, p.y + 3);
+    }
+    if (b.kind === 'recover') {
+      ctx.fillStyle = '#9CCC65';
+      ctx.font = 'bold 8px sans-serif';
+      ctx.fillText('+1', p.x, p.y + 3);
+    }
+  }
+
+  // 木プラットフォーム
+  const deadEnds = analysis ? findDeadEnds(stageData, analysis.reachability, analysis.canReachGoal) : [];
+  for (const wood of stageData.woods) {
+    const p = worldToCanvas(wood.x, wood.y);
+    const isDead = deadEnds.includes(wood.id);
+    const isSelected = selectedWoodId === wood.id;
+
+    // ヒットボックス
+    const hb = worldToCanvas(wood.hitbox.x, wood.hitbox.y);
+    ctx.fillStyle = isDead ? '#EF535040' : isSelected ? '#81C78460' : '#DEB88740';
+    ctx.strokeStyle = isDead ? '#EF5350' : isSelected ? '#81C784' : '#DEB887';
+    ctx.lineWidth = isSelected ? 2.5 : 1.5;
+    ctx.fillRect(hb.x, hb.y, wood.hitbox.w, wood.hitbox.h);
+    ctx.strokeRect(hb.x, hb.y, wood.hitbox.w, wood.hitbox.h);
+
+    // ラベル
+    ctx.fillStyle = isDead ? '#EF5350' : '#ECEFF1';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`W${wood.id}`, p.x, p.y - 20);
+
+    // 到達先の数
+    if (analysis) {
+      const upward = analysis.reachability[wood.id].filter(r => stageData.woods[r.targetId].y < wood.y);
+      ctx.fillStyle = '#90A4AE';
+      ctx.font = '9px sans-serif';
+      ctx.fillText(`↑${upward.length}`, p.x, p.y + wood.hitbox.h / 2 + 14);
+    }
+  }
+
+  // ゴール
+  if (stageData.goal) {
+    const gp = worldToCanvas(stageData.goal.x, stageData.goal.y);
+    ctx.fillStyle = '#FFF59D60';
+    ctx.strokeStyle = '#FFF59D';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    // 星マーク
+    const spikes = 5, outerR = 16, innerR = 7;
+    for (let i = 0; i < spikes * 2; i++) {
+      const r = i % 2 === 0 ? outerR : innerR;
+      const a = (i * Math.PI / spikes) - Math.PI / 2;
+      if (i === 0) ctx.moveTo(gp.x + Math.cos(a) * r, gp.y + Math.sin(a) * r);
+      else ctx.lineTo(gp.x + Math.cos(a) * r, gp.y + Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#FFF59D';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('GOAL', gp.x, gp.y - 22);
+  }
+
+  // 選択中の木からの軌道
+  drawTrajectories();
+}
+
+function drawTrajectories() {
+  for (const traj of displayTrajectories) {
+    if (traj.points.length < 2) continue;
+    ctx.beginPath();
+    const p0 = worldToCanvas(traj.points[0].x, traj.points[0].y);
+    ctx.moveTo(p0.x, p0.y);
+    // 間引いて描画（パフォーマンス）
+    const step = Math.max(1, Math.floor(traj.points.length / 200));
+    for (let i = step; i < traj.points.length; i += step) {
+      const p = worldToCanvas(traj.points[i].x, traj.points[i].y);
+      ctx.lineTo(p.x, p.y);
+    }
+    const pLast = worldToCanvas(traj.points[traj.points.length - 1].x, traj.points[traj.points.length - 1].y);
+    ctx.lineTo(pLast.x, pLast.y);
+    ctx.strokeStyle = traj.color || '#81C78480';
+    ctx.lineWidth = traj.lineWidth || 1.5;
+    ctx.stroke();
+
+    // 終点マーカー
+    ctx.beginPath();
+    ctx.arc(pLast.x, pLast.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = traj.color || '#81C784';
+    ctx.fill();
+  }
+}
+
+// クリック処理
+canvas.addEventListener('click', (e) => {
+  if (!currentStageData || !currentAnalysis) return;
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top + canvas.parentElement.scrollTop;
+
+  // クリック位置に最も近い木を探す
+  let closest = null;
+  let closestDist = Infinity;
+  for (const w of currentStageData.woods) {
+    const p = worldToCanvas(w.x, w.y);
+    const dist = Math.sqrt((cx - p.x) ** 2 + (cy - p.y) ** 2);
+    if (dist < closestDist && dist < 40) {
+      closest = w;
+      closestDist = dist;
+    }
+  }
+
+  if (closest) {
+    selectedWoodId = closest.id;
+    showWoodDetail(closest.id);
+  } else {
+    selectedWoodId = null;
+    displayTrajectories = [];
+    document.getElementById('selected-wood-info').style.display = 'none';
+  }
+  drawStage(currentStageData, currentAnalysis);
+});
+
+function showWoodDetail(woodId) {
+  const analysis = currentAnalysis;
+  const wood = currentStageData.woods[woodId];
+  const reaches = analysis.reachability[woodId];
+  const goalReach = analysis.canReachGoal[woodId];
+
+  // 軌道を表示
+  displayTrajectories = [];
+  const colors = ['#81C784', '#4FC3F7', '#FFB74D', '#CE93D8', '#FF8A65', '#AED581', '#90CAF9'];
+  let ci = 0;
+
+  // 上方向の到達先のみ表示
+  const upwardReaches = reaches.filter(r => currentStageData.woods[r.targetId].y < wood.y);
+  for (const r of upwardReaches) {
+    if (r.trajectory) {
+      displayTrajectories.push({
+        points: r.trajectory,
+        color: colors[ci % colors.length] + '90',
+        lineWidth: 1.5
+      });
+    }
+    ci++;
+  }
+  if (goalReach && goalReach.trajectory) {
+    displayTrajectories.push({
+      points: goalReach.trajectory,
+      color: '#FFF59D',
+      lineWidth: 2.5
+    });
+  }
+
+  // 詳細パネル
+  const panel = document.getElementById('selected-wood-info');
+  panel.style.display = 'block';
+  const angleDeg = (a) => (a * 180 / Math.PI).toFixed(1);
+  const powerPct = (p) => (p * 100).toFixed(0);
+
+  let html = `<h3>W${woodId} (${wood.x.toFixed(0)}, ${wood.y.toFixed(0)}) からの到達先</h3>`;
+  html += `<p>上方向に到達可能: <strong>${upwardReaches.length}</strong>箇所`;
+  if (goalReach) html += ` | <span class="ok">ゴール到達可能</span>`;
+  html += `</p>`;
+
+  if (upwardReaches.length > 0) {
+    html += `<table><tr><th>行き先</th><th>角度(°)</th><th>パワー(%)</th><th>スコア</th><th>回復</th></tr>`;
+    for (const r of upwardReaches) {
+      html += `<tr>
+        <td>W${r.targetId}</td>
+        <td>${angleDeg(r.angle)}</td>
+        <td>${powerPct(r.power)}</td>
+        <td>${r.score}</td>
+        <td>${r.recoveries > 0 ? `+${r.recoveries}` : '-'}</td>
+      </tr>`;
+    }
+    if (goalReach) {
+      html += `<tr class="path-highlight">
+        <td>GOAL</td>
+        <td>${angleDeg(goalReach.angle)}</td>
+        <td>${powerPct(goalReach.power)}</td>
+        <td>${goalReach.score}</td>
+        <td>${goalReach.balloons.filter(b => b.kind === 'recover').length || '-'}</td>
+      </tr>`;
+    }
+    html += `</table>`;
+  }
+
+  panel.innerHTML = html;
+}
+
+// ============================================================
+//  分析レポート生成
+// ============================================================
+function generateReport(stageData, analysis, shortestPath) {
+  const { reachability, canReachGoal } = analysis;
+  const deadEnds = findDeadEnds(stageData, reachability, canReachGoal);
+  const margins = analyzeAngleMargins(reachability, stageData);
+
+  let html = '';
+
+  // --- ステージ概要 ---
+  const stageCfg = STAGE_CONFIGS[stageData.stageIndex - 1];
+  html += `<div class="section">
+    <h2>STAGE ${stageData.stageIndex}: ${stageCfg.name}</h2>
+    <dl class="info-grid">
+      <dt>木の数</dt><dd>${stageData.woods.length}</dd>
+      <dt>風船の数</dt><dd>${stageData.balloons.length}</dd>
+      <dt>回復風船</dt><dd>${stageData.balloons.filter(b => b.kind === 'recover').length}</dd>
+      <dt>風ゾーン</dt><dd>${stageData.winds.length}</dd>
+      <dt>ステージ深度</dt><dd>${stageCfg.depth}px</dd>
+      <dt>最大スコア（風船合計）</dt><dd>${stageData.balloons.reduce((s, b) => s + b.scoreValue, 0)}</dd>
+    </dl>
+  </div>`;
+
+  // --- クリア判定 ---
+  html += `<div class="section">
+    <h2>クリア可能性</h2>`;
+
+  if (shortestPath) {
+    const feasible = shortestPath.arrowsUsed <= INITIAL_ARROWS + shortestPath.recoveries;
+    html += `<p class="${feasible ? 'ok' : 'error'}">
+      ${feasible ? '✓ クリア可能' : '✗ 矢が不足する可能性あり'}
+    </p>`;
+    html += `<dl class="info-grid">
+      <dt>最短経路（矢の消費）</dt><dd>${shortestPath.arrowsUsed}本</dd>
+      <dt>経路上の回復風船</dt><dd>+${shortestPath.recoveries}本</dd>
+      <dt>初期矢</dt><dd>${INITIAL_ARROWS}本</dd>
+      <dt>余裕</dt><dd class="${(INITIAL_ARROWS + shortestPath.recoveries - shortestPath.arrowsUsed) >= 2 ? 'ok' : 'warn'}">${INITIAL_ARROWS + shortestPath.recoveries - shortestPath.arrowsUsed}本</dd>
+      <dt>経路上スコア</dt><dd>${shortestPath.score}</dd>
+    </dl>`;
+    html += `<h3>最短経路</h3><p>`;
+    html += shortestPath.path.map(p => p === 'GOAL' ? '<strong>GOAL</strong>' : `W${p}`).join(' → ');
+    html += `</p>`;
+  } else {
+    html += `<p class="error">✗ ゴールに到達する経路が見つかりません！</p>`;
+  }
+  html += `</div>`;
+
+  // --- デッドエンド ---
+  html += `<div class="section">
+    <h2>デッドエンド分析</h2>`;
+  if (deadEnds.length === 0) {
+    html += `<p class="ok">✓ 上方向への行き止まりなし</p>`;
+  } else {
+    html += `<p class="error">✗ 以下の木から上方向に進めません:</p><ul>`;
+    for (const id of deadEnds) {
+      const w = stageData.woods[id];
+      html += `<li class="error">W${id} (${w.x.toFixed(0)}, ${w.y.toFixed(0)})</li>`;
+    }
+    html += `</ul>`;
+  }
+  html += `</div>`;
+
+  // --- 到達可能性マトリクス ---
+  html += `<div class="section">
+    <h2>到達可能性マトリクス</h2>
+    <p style="font-size:12px;color:#90A4AE">
+      行=発射元、列=着地先。数字=取得可能スコア。色付き=最短経路上。
+    </p>`;
+
+  const pathSet = shortestPath ? new Set(shortestPath.path.filter(p => p !== 'GOAL')) : new Set();
+  const pathEdges = new Set();
+  if (shortestPath) {
+    for (let i = 0; i < shortestPath.path.length - 1; i++) {
+      pathEdges.add(`${shortestPath.path[i]}-${shortestPath.path[i + 1]}`);
+    }
+  }
+
+  // 上方向の遷移のみ表示するコンパクトテーブル
+  html += `<table><tr><th>発射元</th><th>到達先（上方向）</th><th>ゴール</th></tr>`;
+  for (let i = 0; i < stageData.woods.length; i++) {
+    const isOnPath = pathSet.has(i);
+    const upward = reachability[i].filter(r => stageData.woods[r.targetId].y < stageData.woods[i].y);
+    const targetStr = upward.length > 0
+      ? upward.map(r => {
+          const edgeKey = `${i}-${r.targetId}`;
+          const isEdge = pathEdges.has(edgeKey);
+          return `<span class="${isEdge ? 'ok' : ''}">W${r.targetId}(${r.score})</span>`;
+        }).join(', ')
+      : '<span class="error">なし</span>';
+
+    const goalStr = canReachGoal[i]
+      ? `<span class="ok">${canReachGoal[i].score}pt</span>`
+      : '<span style="color:#546E7A">-</span>';
+
+    html += `<tr class="${isOnPath ? 'path-highlight' : ''} ${deadEnds.includes(i) ? 'dead-end' : ''}">
+      <td><strong>W${i}</strong> (${stageData.woods[i].x.toFixed(0)}, ${stageData.woods[i].y.toFixed(0)})</td>
+      <td>${targetStr}</td>
+      <td>${goalStr}</td>
+    </tr>`;
+  }
+  html += `</table></div>`;
+
+  // --- 風の影響分析 ---
+  html += `<div class="section">
+    <h2>風ゾーン影響</h2>
+    <table><tr><th>風ゾーン</th><th>位置</th><th>強度</th><th>影響を受ける遷移</th></tr>`;
+  for (const wind of stageData.winds) {
+    // この風ゾーンの範囲内を通過する可能性のある木ペアを特定
+    const affectedWoods = stageData.woods.filter(w =>
+      Math.abs(w.y - wind.y) < 300 && Math.abs(w.x - wind.x) < 200
+    );
+    const affectedStr = affectedWoods.length > 0
+      ? affectedWoods.map(w => `W${w.id}`).join(', ')
+      : 'なし';
+    const strengthLabel = wind.strength >= WIND_STRENGTH_STRONG ? '強' :
+                          wind.strength >= WIND_STRENGTH_MID ? '中' : '弱';
+    html += `<tr>
+      <td>${wind.label}</td>
+      <td>(${wind.x.toFixed(0)}, ${wind.y.toFixed(0)})</td>
+      <td class="${wind.strength >= WIND_STRENGTH_STRONG ? 'warn' : ''}">${strengthLabel} (${wind.strength})</td>
+      <td>${affectedStr}</td>
+    </tr>`;
+  }
+  html += `</table></div>`;
+
+  // --- バランス診断 ---
+  html += `<div class="section">
+    <h2>バランス診断</h2>`;
+
+  const warnings = [];
+
+  // 矢の余裕が少ない
+  if (shortestPath && (INITIAL_ARROWS + shortestPath.recoveries - shortestPath.arrowsUsed) < 2) {
+    warnings.push({
+      level: 'warn',
+      msg: `矢の余裕が${INITIAL_ARROWS + shortestPath.recoveries - shortestPath.arrowsUsed}本しかありません。初心者にはクリア困難です。`
+    });
+  }
+
+  // デッドエンドがある
+  if (deadEnds.length > 0) {
+    warnings.push({
+      level: 'error',
+      msg: `${deadEnds.length}箇所のデッドエンドがあります。プレイヤーが詰む可能性があります。`
+    });
+  }
+
+  // 到達先が1つしかない木
+  const narrowWoods = stageData.woods.filter((w, i) => {
+    if (i === stageData.woods.length - 1) return false; // 最後の木はゴール前
+    const upward = reachability[i].filter(r => stageData.woods[r.targetId].y < w.y);
+    return upward.length === 1;
+  });
+  if (narrowWoods.length > 0) {
+    warnings.push({
+      level: 'warn',
+      msg: `W${narrowWoods.map(w => w.id).join(', W')} は上方向の到達先が1つだけ。ルートの自由度が低いです。`
+    });
+  }
+
+  // 回復風船がない区間
+  const recoveryBalloons = stageData.balloons.filter(b => b.kind === 'recover');
+  if (recoveryBalloons.length < Math.ceil(stageData.woods.length / 3)) {
+    warnings.push({
+      level: 'warn',
+      msg: `回復風船が${recoveryBalloons.length}個と少なめです（木${stageData.woods.length}個に対して）。`
+    });
+  }
+
+  // ゴールに直接到達できる木が少ない
+  const goalReachable = canReachGoal.filter(g => g !== null).length;
+  if (goalReachable < 2) {
+    warnings.push({
+      level: 'warn',
+      msg: `ゴールに直接到達できる木が${goalReachable}個だけです。クリア手段が限定的です。`
+    });
+  }
+
+  if (warnings.length === 0) {
+    html += `<p class="ok">✓ 大きな問題は検出されませんでした</p>`;
+  } else {
+    html += `<ul>`;
+    for (const w of warnings) {
+      html += `<li class="${w.level}">${w.level === 'error' ? '✗' : '⚠'} ${w.msg}</li>`;
+    }
+    html += `</ul>`;
+  }
+
+  html += `</div>`;
+
+  // 凡例
+  html += `<div class="section">
+    <h2>操作方法</h2>
+    <p>左のマップ上の木プラットフォームをクリックすると、そこからの到達可能な軌道が表示されます。</p>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-color" style="background:#DEB887"></div>木</div>
+      <div class="legend-item"><div class="legend-color" style="background:#EF5350"></div>デッドエンド</div>
+      <div class="legend-item"><div class="legend-color" style="background:#FF6B9D"></div>風船</div>
+      <div class="legend-item"><div class="legend-color" style="background:#9CCC65"></div>回復風船</div>
+      <div class="legend-item"><div class="legend-color" style="background:#FDD835"></div>風ゾーン</div>
+      <div class="legend-item"><div class="legend-color" style="background:#FFF59D"></div>ゴール</div>
+    </div>
+  </div>`;
+
+  // 選択中の木の詳細表示領域
+  html += `<div id="selected-wood-info"></div>`;
+
+  return html;
+}
+
+// ============================================================
+//  アプリケーション制御
+// ============================================================
+let currentStage = 1;
+
+function selectStage(idx) {
+  currentStage = idx;
+  document.querySelectorAll('.stage-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', i + 1 === idx);
+  });
+  runAnalysis();
+}
+
+function rerunAnalysis() {
+  runAnalysis();
+}
+
+function runAnalysis() {
+  const arrowType = document.getElementById('arrowType').value;
+  const resultsDiv = document.getElementById('results');
+  resultsDiv.innerHTML = '<p>解析中...</p>';
+
+  // 非同期で実行（UIブロック防止）
+  requestAnimationFrame(() => {
+    const t0 = performance.now();
+
+    // ステージデータ生成
+    const stageData = generateStageData(currentStage);
+    currentStageData = stageData;
+
+    // キャンバスセットアップ
+    setupCanvas(stageData);
+
+    // 到達可能性分析
+    const analysis = analyzeReachability(stageData, arrowType);
+    currentAnalysis = analysis;
+
+    // 最短経路
+    const shortestPath = findShortestPath(stageData, analysis.reachability, analysis.canReachGoal);
+
+    const t1 = performance.now();
+
+    // レポート生成
+    let report = generateReport(stageData, analysis, shortestPath);
+    report += `<div class="section"><p style="font-size:12px;color:#546E7A">解析時間: ${(t1 - t0).toFixed(0)}ms | Sweep: ${90 * 20}通り/木 × ${stageData.woods.length}木</p></div>`;
+
+    resultsDiv.innerHTML = report;
+
+    // 初期描画
+    selectedWoodId = null;
+    displayTrajectories = [];
+
+    // 最短経路の軌道を初期表示
+    if (shortestPath) {
+      for (let i = 0; i < shortestPath.path.length - 1; i++) {
+        const fromId = shortestPath.path[i];
+        if (fromId === 'GOAL') continue;
+        const toId = shortestPath.path[i + 1];
+
+        let traj = null;
+        if (toId === 'GOAL' && analysis.canReachGoal[fromId]) {
+          traj = analysis.canReachGoal[fromId].trajectory;
+        } else {
+          const reach = analysis.reachability[fromId].find(r => r.targetId === toId);
+          if (reach) traj = reach.trajectory;
+        }
+
+        if (traj) {
+          displayTrajectories.push({
+            points: traj,
+            color: '#81C784A0',
+            lineWidth: 2
+          });
+        }
+      }
+    }
+
+    drawStage(stageData, analysis);
+  });
+}
+
+// 初回実行
+selectStage(1);
+</script>
+
+</body>
+</html>
