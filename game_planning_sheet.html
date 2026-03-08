@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>ゲーム企画シート - ブロマスゲームラボ</title>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  body {
+    font-family: 'M PLUS Rounded 1c', sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 16px;
+    color: #333;
+  }
+
+  .container {
+    max-width: 520px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 24px;
+    padding: 28px 20px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .container::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 6px;
+    background: linear-gradient(90deg, #F59E0B, #2563EB, #F59E0B);
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 800;
+    text-align: center;
+    color: #2563EB;
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    text-align: center;
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 24px;
+  }
+
+  .section {
+    margin-bottom: 20px;
+  }
+
+  .section-label {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #2563EB;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .section-label .num {
+    background: #F59E0B;
+    color: #fff;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
+
+  .hint {
+    font-size: 0.75rem;
+    color: #999;
+    margin-bottom: 6px;
+    padding-left: 32px;
+  }
+
+  .text-input {
+    width: 100%;
+    padding: 12px 14px;
+    border: 2px solid #e0e0e0;
+    border-radius: 12px;
+    font-family: 'M PLUS Rounded 1c', sans-serif;
+    font-size: 1rem;
+    transition: border-color 0.2s;
+    outline: none;
+  }
+
+  .text-input:focus {
+    border-color: #2563EB;
+  }
+
+  .text-input::placeholder {
+    color: #ccc;
+  }
+
+  .checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-left: 0;
+  }
+
+  .checkbox-group label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: 2px solid #e0e0e0;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .checkbox-group label:has(input:checked) {
+    border-color: #2563EB;
+    background: #EBF0FF;
+    color: #2563EB;
+    font-weight: 700;
+  }
+
+  .checkbox-group input[type="checkbox"],
+  .checkbox-group input[type="radio"] {
+    display: none;
+  }
+
+  .checkbox-group label .check-icon {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #ccc;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+
+  .checkbox-group label .check-icon.radio {
+    border-radius: 50%;
+  }
+
+  .checkbox-group label:has(input:checked) .check-icon {
+    background: #2563EB;
+    border-color: #2563EB;
+  }
+
+  .checkbox-group label:has(input:checked) .check-icon::after {
+    content: '✓';
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .other-input {
+    width: 100%;
+    margin-top: 8px;
+    padding: 8px 12px;
+    border: 2px dashed #e0e0e0;
+    border-radius: 10px;
+    font-family: 'M PLUS Rounded 1c', sans-serif;
+    font-size: 0.9rem;
+    outline: none;
+    display: none;
+  }
+
+  .other-input.visible {
+    display: block;
+  }
+
+  .other-input:focus {
+    border-color: #2563EB;
+  }
+
+  .sub-label {
+    font-size: 0.8rem;
+    color: #666;
+    margin: 10px 0 6px 0;
+    font-weight: 700;
+  }
+
+  .divider {
+    height: 1px;
+    background: #eee;
+    margin: 20px 0;
+  }
+
+  .btn-area {
+    display: flex;
+    gap: 10px;
+    margin-top: 24px;
+  }
+
+  .btn {
+    flex: 1;
+    padding: 14px;
+    border: none;
+    border-radius: 14px;
+    font-family: 'M PLUS Rounded 1c', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .btn-copy {
+    background: #2563EB;
+    color: #fff;
+  }
+
+  .btn-copy:active {
+    transform: scale(0.96);
+    background: #1d4ed8;
+  }
+
+  .btn-reset {
+    background: #f3f4f6;
+    color: #666;
+    flex: 0.5;
+  }
+
+  .btn-reset:active {
+    transform: scale(0.96);
+    background: #e5e7eb;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: #333;
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    transition: transform 0.3s ease;
+    z-index: 100;
+  }
+
+  .toast.show {
+    transform: translateX(-50%) translateY(0);
+  }
+
+  .preview-area {
+    margin-top: 16px;
+    padding: 14px;
+    background: #f8f9fa;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    color: #555;
+    line-height: 1.6;
+    display: none;
+    border: 1px solid #eee;
+  }
+
+  .preview-area.visible {
+    display: block;
+  }
+
+  .preview-toggle {
+    text-align: center;
+    margin-top: 12px;
+  }
+
+  .preview-toggle button {
+    background: none;
+    border: none;
+    color: #2563EB;
+    font-family: 'M PLUS Rounded 1c', sans-serif;
+    font-size: 0.85rem;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .logo {
+    text-align: center;
+    margin-top: 16px;
+    font-size: 0.7rem;
+    color: #bbb;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>🎮 ゲーム企画シート</h1>
+  <p class="subtitle">チェックして、書いて、AIに伝えよう！</p>
+
+  <!-- 1. コンセプト -->
+  <div class="section">
+    <div class="section-label"><span class="num">1</span>コンセプト</div>
+    <p class="hint">「○○が○○するゲーム」で書いてみよう</p>
+    <input type="text" class="text-input" id="concept" placeholder="例：ゾンビがうじゃうじゃ歩いてくるので撃つゲーム">
+  </div>
+
+  <!-- 2. ジャンル -->
+  <div class="section">
+    <div class="section-label"><span class="num">2</span>ジャンル</div>
+    <p class="hint">今回はカジュアルなゲームを作ります</p>
+    <div class="checkbox-group">
+      <label><input type="radio" name="genre" value="避けゲー"><span class="check-icon radio"></span>避けゲー</label>
+      <label><input type="radio" name="genre" value="集めゲー"><span class="check-icon radio"></span>集めゲー</label>
+      <label><input type="radio" name="genre" value="タップゲー"><span class="check-icon radio"></span>タップゲー</label>
+      <label><input type="radio" name="genre" value="生存ゲー"><span class="check-icon radio"></span>生存ゲー</label>
+      <label><input type="radio" name="genre" value="誘導ゲー"><span class="check-icon radio"></span>誘導ゲー</label>
+      <label><input type="radio" name="genre" value="仕分けゲー"><span class="check-icon radio"></span>仕分けゲー</label>
+      <label><input type="radio" name="genre" value="その他" id="genre-other-check"><span class="check-icon radio"></span>その他</label>
+    </div>
+    <input type="text" class="other-input" id="genre-other" placeholder="ジャンルを入力...">
+  </div>
+
+  <!-- 3. 画面 -->
+  <div class="section">
+    <div class="section-label"><span class="num">3</span>画面の向き</div>
+    <div class="checkbox-group">
+      <label><input type="radio" name="screen" value="たて"><span class="check-icon radio"></span>📱 たて</label>
+      <label><input type="radio" name="screen" value="よこ"><span class="check-icon radio"></span>🖥️ よこ</label>
+    </div>
+  </div>
+
+  <!-- 3.5 2D/3D -->
+  <div class="section">
+    <div class="section-label"><span class="num">4</span>次元</div>
+    <div class="checkbox-group">
+      <label><input type="radio" name="dimension" value="2D（平面）"><span class="check-icon radio"></span>2D（平面）</label>
+      <label><input type="radio" name="dimension" value="3D（立体）"><span class="check-icon radio"></span>3D（立体）</label>
+    </div>
+  </div>
+
+  <!-- 5. 操作 -->
+  <div class="section">
+    <div class="section-label"><span class="num">5</span>操作方法</div>
+    <p class="sub-label">スマホ</p>
+    <div class="checkbox-group">
+      <label><input type="checkbox" name="control" value="タップ"><span class="check-icon"></span>タップ</label>
+      <label><input type="checkbox" name="control" value="スワイプ"><span class="check-icon"></span>スワイプ</label>
+      <label><input type="checkbox" name="control" value="ボタン"><span class="check-icon"></span>ボタン</label>
+    </div>
+    <p class="sub-label">PC</p>
+    <div class="checkbox-group">
+      <label><input type="checkbox" name="control" value="キーボード"><span class="check-icon"></span>キーボード</label>
+      <label><input type="checkbox" name="control" value="マウス"><span class="check-icon"></span>マウス</label>
+    </div>
+  </div>
+
+  <!-- 5. 主人公 -->
+  <div class="section">
+    <div class="section-label"><span class="num">6</span>主人公</div>
+    <input type="text" class="text-input" id="character" placeholder="例：ネコ、ロボット、自分...">
+  </div>
+
+  <!-- 7. スタイル -->
+  <div class="section">
+    <div class="section-label"><span class="num">7</span>どんな見た目にする？</div>
+    <p class="hint">スタイルをえらんでね</p>
+    <div class="checkbox-group">
+      <label><input type="radio" name="mood" value="レトロドット絵"><span class="check-icon radio"></span>レトロドット絵</label>
+      <label><input type="radio" name="mood" value="ネオン"><span class="check-icon radio"></span>ネオン</label>
+      <label><input type="radio" name="mood" value="ミニマル"><span class="check-icon radio"></span>ミニマル</label>
+      <label><input type="radio" name="mood" value="KAWAII"><span class="check-icon radio"></span>KAWAII</label>
+      <label><input type="radio" name="mood" value="アニメ風"><span class="check-icon radio"></span>アニメ風</label>
+      <label><input type="radio" name="mood" value="パステル"><span class="check-icon radio"></span>パステル</label>
+      <label><input type="radio" name="mood" value="モダン"><span class="check-icon radio"></span>モダン</label>
+      <label><input type="radio" name="mood" value="カートゥーン"><span class="check-icon radio"></span>カートゥーン</label>
+      <label><input type="radio" name="mood" value="フューチャー"><span class="check-icon radio"></span>フューチャー</label>
+      <label><input type="radio" name="mood" value="手描き風"><span class="check-icon radio"></span>手描き風</label>
+      <label><input type="radio" name="mood" value="ダーク"><span class="check-icon radio"></span>ダーク</label>
+      <label><input type="radio" name="mood" value="ペーパークラフト"><span class="check-icon radio"></span>ペーパークラフト</label>
+      <label><input type="radio" name="mood" value="水彩画風"><span class="check-icon radio"></span>水彩画風</label>
+      <label><input type="radio" name="mood" value="ポップアート"><span class="check-icon radio"></span>ポップアート</label>
+      <label><input type="radio" name="mood" value="コミック風"><span class="check-icon radio"></span>コミック風</label>
+      <label><input type="radio" name="mood" value="ナチュラル"><span class="check-icon radio"></span>ナチュラル</label>
+      <label><input type="radio" name="mood" value="ダークファンタジー"><span class="check-icon radio"></span>ダークファンタジー</label>
+      <label><input type="radio" name="mood" value="中世ファンタジー"><span class="check-icon radio"></span>中世ファンタジー</label>
+      <label><input type="radio" name="mood" value="SF"><span class="check-icon radio"></span>SF</label>
+      <label><input type="radio" name="mood" value="その他" id="mood-other-check"><span class="check-icon radio"></span>その他</label>
+    </div>
+    <input type="text" class="other-input" id="mood-other" placeholder="スタイルを入力...">
+  </div>
+
+  <!-- 7. クリア条件 -->
+  <div class="section">
+    <div class="section-label"><span class="num">8</span>クリア条件</div>
+    <div class="checkbox-group">
+      <label><input type="radio" name="clear" value="時間"><span class="check-icon radio"></span>⏰ 時間</label>
+      <label><input type="radio" name="clear" value="スコア"><span class="check-icon radio"></span>🏆 スコア</label>
+      <label><input type="radio" name="clear" value="全部集める"><span class="check-icon radio"></span>⭐ 全部集める</label>
+      <label><input type="radio" name="clear" value="その他" id="clear-other-check"><span class="check-icon radio"></span>その他</label>
+    </div>
+    <input type="text" class="other-input" id="clear-other" placeholder="クリア条件を入力...">
+  </div>
+
+  <!-- 8. ゴール -->
+  <div class="section">
+    <div class="section-label"><span class="num">9</span>ゴール</div>
+    <p class="hint">プレイヤーが目指すもの</p>
+    <div class="checkbox-group">
+      <label><input type="radio" name="goal" value="高得点を目指す"><span class="check-icon radio"></span>高得点を目指す</label>
+      <label><input type="radio" name="goal" value="ステージをクリア"><span class="check-icon radio"></span>ステージをクリア</label>
+      <label><input type="radio" name="goal" value="生き残る"><span class="check-icon radio"></span>生き残る</label>
+      <label><input type="radio" name="goal" value="全部集める"><span class="check-icon radio"></span>全部集める</label>
+      <label><input type="radio" name="goal" value="タイムアタック"><span class="check-icon radio"></span>タイムアタック</label>
+      <label><input type="radio" name="goal" value="その他" id="goal-other-check"><span class="check-icon radio"></span>その他</label>
+    </div>
+    <input type="text" class="other-input" id="goal-other" placeholder="ゴールを入力...">
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Claude Code用 -->
+  <div class="section">
+    <div class="checkbox-group">
+      <label style="border-color: #8B5CF6;"><input type="checkbox" id="claude-mode"><span class="check-icon" style="border-color: #8B5CF6;"></span>🤖 Claude Code用の仕様を追加する</label>
+    </div>
+    <p class="hint" style="margin-top: 6px;">チェックするとClaude Code向けのデザイン規約がテキストに含まれます</p>
+  </div>
+
+  <!-- プレビュー -->
+  <div class="preview-toggle">
+    <button onclick="togglePreview()">📋 テキストをプレビュー</button>
+  </div>
+  <div class="preview-area" id="preview"></div>
+
+  <!-- ボタン -->
+  <div class="btn-area">
+    <button class="btn btn-reset" onclick="resetForm()">リセット</button>
+    <button class="btn btn-copy" onclick="copyText()">📋 テキストをコピー</button>
+  </div>
+
+  <div class="logo">ブロマスゲームラボ 🎮</div>
+</div>
+
+<div class="toast" id="toast">コピーしました！</div>
+
+<script>
+  // その他の入力欄表示
+  document.getElementById('genre-other-check').addEventListener('change', function() {
+    document.getElementById('genre-other').classList.toggle('visible', this.checked);
+  });
+  document.querySelectorAll('input[name="genre"]').forEach(r => {
+    r.addEventListener('change', () => {
+      const otherChecked = document.getElementById('genre-other-check').checked;
+      document.getElementById('genre-other').classList.toggle('visible', otherChecked);
+    });
+  });
+
+  document.getElementById('mood-other-check').addEventListener('change', function() {
+    document.getElementById('mood-other').classList.toggle('visible', this.checked);
+  });
+  document.querySelectorAll('input[name="mood"]').forEach(r => {
+    r.addEventListener('change', () => {
+      const otherChecked = document.getElementById('mood-other-check').checked;
+      document.getElementById('mood-other').classList.toggle('visible', otherChecked);
+    });
+  });
+
+  document.getElementById('clear-other-check').addEventListener('change', function() {
+    document.getElementById('clear-other').classList.toggle('visible', this.checked);
+  });
+  document.querySelectorAll('input[name="clear"]').forEach(r => {
+    r.addEventListener('change', () => {
+      const otherChecked = document.getElementById('clear-other-check').checked;
+      document.getElementById('clear-other').classList.toggle('visible', otherChecked);
+    });
+  });
+
+  document.getElementById('goal-other-check').addEventListener('change', function() {
+    document.getElementById('goal-other').classList.toggle('visible', this.checked);
+  });
+  document.querySelectorAll('input[name="goal"]').forEach(r => {
+    r.addEventListener('change', () => {
+      const otherChecked = document.getElementById('goal-other-check').checked;
+      document.getElementById('goal-other').classList.toggle('visible', otherChecked);
+    });
+  });
+
+  function generateText() {
+    const lines = [];
+    
+    const concept = document.getElementById('concept').value;
+    if (concept) lines.push('コンセプト：' + concept);
+
+    const genre = document.querySelector('input[name="genre"]:checked');
+    if (genre) {
+      const val = genre.value === 'その他' ? document.getElementById('genre-other').value || 'その他' : genre.value;
+      lines.push('ジャンル：' + val);
+    }
+
+    const screen = document.querySelector('input[name="screen"]:checked');
+    if (screen) lines.push('画面：' + screen.value);
+
+    const dimension = document.querySelector('input[name="dimension"]:checked');
+    if (dimension) lines.push('次元：' + dimension.value);
+
+    const controls = [...document.querySelectorAll('input[name="control"]:checked')].map(c => c.value);
+    if (controls.length) lines.push('操作：' + controls.join('、'));
+
+    const character = document.getElementById('character').value;
+    if (character) lines.push('主人公：' + character);
+
+    const mood = document.querySelector('input[name="mood"]:checked');
+    if (mood) {
+      const val = mood.value === 'その他' ? document.getElementById('mood-other').value || 'その他' : mood.value;
+      lines.push('スタイル：' + val);
+    }
+
+    const clear = document.querySelector('input[name="clear"]:checked');
+    if (clear) {
+      const val = clear.value === 'その他' ? document.getElementById('clear-other').value || 'その他' : clear.value;
+      lines.push('クリア条件：' + val);
+    }
+
+    const goal = document.querySelector('input[name="goal"]:checked');
+    if (goal) {
+      const val = goal.value === 'その他' ? document.getElementById('goal-other').value || 'その他' : goal.value;
+      lines.push('ゴール：' + val);
+    }
+
+    // Claude Code用の仕様追加
+    if (document.getElementById('claude-mode').checked) {
+      lines.push('');
+      lines.push('--- 技術仕様（Claude Code用） ---');
+      lines.push('形式：単一HTMLファイル（HTML・CSS・JavaScript一体型）');
+      
+      // 次元に応じた描画ライブラリ
+      const dimVal = dimension ? dimension.value : '';
+      if (dimVal.includes('3D')) {
+        lines.push('描画ライブラリ：Three.js（CDN読み込み）');
+      } else if (dimVal.includes('2D')) {
+        lines.push('描画ライブラリ：Phaser 3（CDN読み込み）');
+      } else {
+        lines.push('描画ライブラリ：2Dの場合はPhaser 3、3Dの場合はThree.js（CDN読み込み）');
+      }
+      
+      // スタイルに応じたビジュアル仕様
+      const styleVal = mood ? (mood.value === 'その他' ? document.getElementById('mood-other').value || '' : mood.value) : '';
+      const styleMap = {
+        'レトロドット絵': '「レトロドット絵」— ピクセルアート風、8bit/16bitカラー、ドット感のあるフォントとUI',
+        'ネオン': '「ネオン」— 暗い背景にネオンカラーの発光エフェクト、グロウ効果、サイバーパンク風UI',
+        'ミニマル': '「ミニマル」— シンプルな図形、余白を活かしたデザイン、モノクロ+アクセントカラー',
+        'KAWAII': '「Kawaii / ゆめかわいい」— パステルカラー（ピンク背景 #FFF0F5 など）、丸みのある形状、ポップでドリーミーな世界観',
+        'アニメ風': '「アニメ風」— 鮮やかな色彩、太めのアウトライン、キャラクター重視のUI',
+        'パステル': '「パステル」— 柔らかいパステルトーン、淡い色合い、優しい雰囲気のUI',
+        'モダン': '「モダン」— フラットデザイン、シャープなエッジ、洗練されたカラーパレット',
+        'カートゥーン': '「カートゥーン」— 大胆な色使い、太いアウトライン、コミカルな表現、誇張されたアニメーション',
+        'フューチャー': '「フューチャー」— メタリックな質感、ホログラム風UI、SF的なカラースキーム',
+        '手描き風': '「手描き風」— スケッチ風の線、クレヨンや鉛筆のテクスチャ、温かみのあるUI',
+        'ダーク': '「ダーク」— ダークテーマ、深い色合い、コントラストの強いアクセントカラー',
+        'ペーパークラフト': '「ペーパークラフト」— 紙の質感、折り紙風の立体感、切り絵風のキャラクター',
+        '水彩画風': '「水彩画風」— にじみのある色彩、透明感のあるレイヤー、柔らかいグラデーション',
+        'ポップアート': '「ポップアート」— ビビッドカラー、ハーフトーン、大胆なタイポグラフィ',
+        'コミック風': '「コミック風」— 吹き出し、効果線、コマ割り風のUI、ベタ塗りカラー',
+        'ナチュラル': '「ナチュラル」— アースカラー、自然素材のテクスチャ、落ち着いたトーン',
+        'ダークファンタジー': '「ダークファンタジー」— 深い紫や赤、ゴシック風装飾、魔法陣エフェクト',
+        '中世ファンタジー': '「中世ファンタジー」— 羊皮紙テクスチャ、ゴールド装飾、中世風のフォントとUI',
+        'SF': '「SF」— 宇宙的なカラースキーム、ホログラムUI、グリッドライン、テクノロジー感'
+      };
+      if (styleVal && styleMap[styleVal]) {
+        lines.push('ビジュアルスタイル：' + styleMap[styleVal]);
+      } else if (styleVal) {
+        lines.push('ビジュアルスタイル：「' + styleVal + '」');
+      } else {
+        lines.push('ビジュアルスタイル：「Kawaii / ゆめかわいい」— パステルカラー（ピンク背景 #FFF0F5 など）、丸みのある形状、ポップでドリーミーな世界観');
+      }
+      
+      lines.push('フォント：M PLUS Rounded 1c（Google Fonts）');
+      
+      // 画面の向きに応じたプラットフォーム
+      const screenVal = screen ? screen.value : '';
+      if (screenVal === 'たて') {
+        lines.push('対象プラットフォーム：モバイルファースト（ポートレート向き、タッチ操作）');
+      } else if (screenVal === 'よこ') {
+        lines.push('対象プラットフォーム：ランドスケープ向き（PC/タブレット想定）');
+      } else {
+        lines.push('対象プラットフォーム：モバイルファースト（タッチ操作対応）');
+      }
+      
+      lines.push('言語：UIテキストとコメントは日本語');
+    }
+
+    return lines.join('\n');
+  }
+
+  function togglePreview() {
+    const preview = document.getElementById('preview');
+    if (preview.classList.contains('visible')) {
+      preview.classList.remove('visible');
+    } else {
+      const text = generateText();
+      preview.textContent = text || '（まだ何も入力されていません）';
+      preview.classList.add('visible');
+    }
+  }
+
+  function copyText() {
+    const text = generateText();
+    if (!text) {
+      showToast('何か入力してね！');
+      return;
+    }
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('コピーしました！DreamCoreに貼り付けよう 🚀');
+    }).catch(() => {
+      // fallback
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast('コピーしました！');
+    });
+  }
+
+  function resetForm() {
+    document.getElementById('concept').value = '';
+    document.getElementById('character').value = '';
+    document.getElementById('genre-other').value = '';
+    document.getElementById('mood-other').value = '';
+    document.getElementById('clear-other').value = '';
+    document.getElementById('goal-other').value = '';
+    
+    document.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach(i => i.checked = false);
+    document.querySelectorAll('.other-input').forEach(i => i.classList.remove('visible'));
+    document.getElementById('preview').classList.remove('visible');
+    
+    showToast('リセットしました');
+  }
+
+  function showToast(msg) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2000);
+  }
+</script>
+
+</body>
+</html>
