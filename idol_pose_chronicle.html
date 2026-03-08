@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>聖歌劇フォトクロニクル</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;900&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --parchment: #f3e3be;
+      --ink: #3a2712;
+      --gold: #c9a14a;
+      --deep-brown: #2a1a0b;
+      --wine: #5e1f32;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+      user-select: none;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      font-family: 'M PLUS Rounded 1c', sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 20% 10%, #6f3a2f 0%, transparent 45%),
+        radial-gradient(circle at 80% 0%, #4f2924 0%, transparent 40%),
+        linear-gradient(135deg, #2f1b12 0%, #1c120d 100%);
+    }
+
+    #game-shell {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 10px;
+    }
+
+    #game {
+      width: min(96vw, 1320px);
+      aspect-ratio: 16 / 9;
+      border: 8px solid var(--gold);
+      border-radius: 14px;
+      box-shadow: 0 0 0 4px #7d5b2e inset, 0 14px 30px rgba(0, 0, 0, 0.45);
+      overflow: hidden;
+      background: repeating-linear-gradient(
+        45deg,
+        #f0e4c7,
+        #f0e4c7 12px,
+        #ebdbb7 12px,
+        #ebdbb7 24px
+      );
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-shell">
+    <div id="game"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script>
+    (() => {
+      const W = 1280;
+      const H = 720;
+      const POSES = ['祈り', '剣舞', '礼', '星指し', '歓声', '決め'];
+      const FACES = ['微笑み', 'ウィンク'];
+      const CLEAR_SCORE = 1200;
+      const TIME_LIMIT = 90;
+
+      class MainScene extends Phaser.Scene {
+        constructor() {
+          super('MainScene');
+        }
+
+        create() {
+          this.score = 0;
+          this.combo = 0;
+          this.timeLeft = TIME_LIMIT;
+          this.currentPoseIndex = 0;
+          this.currentFaceIndex = 0;
+          this.targetPoseIndex = Phaser.Math.Between(0, POSES.length - 1);
+          this.collected = new Set();
+          this.lastShotAt = 0;
+          this.finished = false;
+
+          this.drawStage();
+          this.createIdol();
+          this.createHud();
+          this.setPose(this.currentPoseIndex, this.currentFaceIndex);
+
+          this.poseTimer = this.time.addEvent({
+            delay: 1050,
+            loop: true,
+            callback: () => {
+              if (this.finished) return;
+              this.currentPoseIndex = Phaser.Math.Between(0, POSES.length - 1);
+              this.currentFaceIndex = Phaser.Math.Between(0, FACES.length - 1);
+              this.setPose(this.currentPoseIndex, this.currentFaceIndex);
+            }
+          });
+
+          this.clockTimer = this.time.addEvent({
+            delay: 1000,
+            loop: true,
+            callback: () => {
+              if (this.finished) return;
+              this.timeLeft -= 1;
+              this.timeText.setText(`残り時間: ${this.timeLeft}s`);
+              if (this.timeLeft <= 0) this.endGame(false);
+            }
+          });
+
+          this.input.on('pointerdown', () => this.tryShoot());
+          this.input.keyboard.on('keydown-SPACE', () => this.tryShoot());
+          this.input.keyboard.on('keydown-ENTER', () => this.tryShoot());
+        }
+
+        drawStage() {
+          const bg = this.add.graphics();
+          bg.fillGradientStyle(0x3d2316, 0x3d2316, 0x21140d, 0x21140d, 1);
+          bg.fillRect(0, 0, W, H);
+
+          bg.fillStyle(0x6f243d, 1);
+          bg.fillRect(0, 0, 170, H);
+          bg.fillRect(W - 170, 0, 170, H);
+          bg.fillStyle(0x7f2d47, 1);
+          bg.fillRect(145, 0, 25, H);
+          bg.fillRect(W - 170, 0, 25, H);
+
+          bg.fillStyle(0x704f2a, 1);
+          bg.fillRect(0, 540, W, 180);
+          for (let i = 0; i < 26; i++) {
+            bg.lineStyle(1, 0x5a3e20, 0.8);
+            bg.lineBetween(i * 50, 540, i * 50 + 40, 720);
+          }
+
+          this.add.circle(145, 190, 24, 0xffdd8a, 0.9);
+          this.add.circle(W - 145, 190, 24, 0xffdd8a, 0.9);
+          this.add.circle(145, 190, 44, 0xffdd8a, 0.2);
+          this.add.circle(W - 145, 190, 44, 0xffdd8a, 0.2);
+        }
+
+        createIdol() {
+          this.idol = this.add.container(W * 0.5, 440);
+
+          const body = this.add.ellipse(0, 0, 120, 160, 0xf8d7d9);
+          const dress = this.add.triangle(0, 95, -90, 10, 90, 10, 0, 210, 0x7d4bb5);
+          const head = this.add.circle(0, -108, 52, 0xffe0c2);
+          const hair = this.add.ellipse(0, -126, 112, 84, 0x51311a);
+          const eyeL = this.add.circle(-20, -110, 5, 0x2a1a0b);
+          const eyeR = this.add.circle(20, -110, 5, 0x2a1a0b);
+          const mouth = this.add.arc(0, -90, 14, 20, 160, false, 0xca4f64)
+            .setStrokeStyle(3, 0xca4f64, 1);
+          const armL = this.add.rectangle(-58, -20, 22, 120, 0xffd7bf);
+          const armR = this.add.rectangle(58, -20, 22, 120, 0xffd7bf);
+          const cameraFlash = this.add.circle(0, -250, 8, 0xffffff, 0);
+
+          this.idol.add([dress, body, armL, armR, hair, head, eyeL, eyeR, mouth, cameraFlash]);
+
+          this.parts = { eyeL, eyeR, mouth, armL, armR, cameraFlash };
+          this.tweens.add({
+            targets: this.idol,
+            y: 430,
+            duration: 900,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+          });
+        }
+
+        createHud() {
+          const panel = this.add.rectangle(W / 2, 78, 1060, 128, 0xf4e4bf, 0.96)
+            .setStrokeStyle(4, 0xc9a14a);
+          panel.setDepth(10);
+
+          this.titleText = this.add.text(110, 38, '聖歌劇フォトクロニクル', {
+            fontFamily: 'M PLUS Rounded 1c',
+            fontSize: '38px',
+            color: '#5b2f14',
+            fontStyle: '900'
+          }).setDepth(11);
+
+          this.targetText = this.add.text(110, 86, '', {
+            fontFamily: 'M PLUS Rounded 1c',
+            fontSize: '30px',
+            color: '#3a2712',
+            fontStyle: '700'
+          }).setDepth(11);
+
+          this.scoreText = this.add.text(740, 38, '', {
+            fontFamily: 'M PLUS Rounded 1c',
+            fontSize: '26px',
+            color: '#3a2712',
+            fontStyle: '700'
+          }).setDepth(11);
+
+          this.collectionText = this.add.text(740, 72, '', {
+            fontFamily: 'M PLUS Rounded 1c',
+            fontSize: '26px',
+            color: '#3a2712',
+            fontStyle: '700'
+          }).setDepth(11);
+
+          this.timeText = this.add.text(740, 104, `残り時間: ${this.timeLeft}s`, {
+            fontFamily: 'M PLUS Rounded 1c',
+            fontSize: '24px',
+            color: '#3a2712',
+            fontStyle: '700'
+          }).setDepth(11);
+
+          this.guideText = this.add.text(W / 2, H - 26, '撮影: タップ / Space / Enter', {
+            fontFamily: 'M PLUS Rounded 1c',
+            fontSize: '24px',
+            color: '#f9e6bb',
+            fontStyle: '700'
+          }).setOrigin(0.5).setDepth(10);
+
+          this.resultPanel = this.add.rectangle(W / 2, H / 2, 760, 300, 0x201309, 0.92)
+            .setStrokeStyle(5, 0xc9a14a)
+            .setVisible(false)
+            .setDepth(30);
+
+          this.resultText = this.add.text(W / 2, H / 2, '', {
+            fontFamily: 'M PLUS Rounded 1c',
+            fontSize: '44px',
+            color: '#f7e4b9',
+            align: 'center',
+            fontStyle: '900'
+          }).setOrigin(0.5).setVisible(false).setDepth(31);
+
+          this.refreshHud();
+        }
+
+        setPose(poseIndex, faceIndex) {
+          const armL = this.parts.armL;
+          const armR = this.parts.armR;
+          const mouth = this.parts.mouth;
+          const eyeR = this.parts.eyeR;
+
+          eyeR.setScale(1, faceIndex === 1 ? 0.18 : 1);
+          mouth.setScale(1, poseIndex === 2 ? 0.65 : 1);
+
+          const poses = [
+            { l: -35, r: 35, lr: -20, rr: 20 },
+            { l: -75, r: 75, lr: -60, rr: 60 },
+            { l: -40, r: 40, lr: -6, rr: 6 },
+            { l: -20, r: 70, lr: -35, rr: 85 },
+            { l: -80, r: 80, lr: -110, rr: 110 },
+            { l: -12, r: 12, lr: -160, rr: 160 }
+          ][poseIndex];
+
+          this.tweens.add({ targets: armL, x: poses.l, angle: poses.lr, duration: 210, ease: 'Cubic.easeOut' });
+          this.tweens.add({ targets: armR, x: poses.r, angle: poses.rr, duration: 210, ease: 'Cubic.easeOut' });
+        }
+
+        tryShoot() {
+          if (this.finished) return;
+          const now = this.time.now;
+          if (now - this.lastShotAt < 220) return;
+          this.lastShotAt = now;
+
+          const hit = this.currentPoseIndex === this.targetPoseIndex;
+          if (hit) {
+            this.combo += 1;
+            const gained = 100 + Math.min(this.combo, 6) * 15;
+            this.score += gained;
+
+            const cardKey = `${POSES[this.currentPoseIndex]}-${FACES[this.currentFaceIndex]}`;
+            this.collected.add(cardKey);
+
+            this.parts.cameraFlash.setAlpha(0.95);
+            this.tweens.add({
+              targets: this.parts.cameraFlash,
+              alpha: 0,
+              scale: 3,
+              duration: 140,
+              ease: 'Quad.easeOut',
+              onComplete: () => this.parts.cameraFlash.setScale(1)
+            });
+
+            this.targetPoseIndex = Phaser.Math.Between(0, POSES.length - 1);
+          } else {
+            this.combo = 0;
+            this.score = Math.max(0, this.score - 30);
+            this.cameras.main.shake(90, 0.0025);
+          }
+
+          this.refreshHud();
+          const allCollected = this.collected.size >= POSES.length * FACES.length;
+          if (allCollected && this.score >= CLEAR_SCORE) this.endGame(true);
+        }
+
+        refreshHud() {
+          this.targetText.setText(`お題ポーズ: ${POSES[this.targetPoseIndex]}`);
+          this.scoreText.setText(`スコア: ${this.score}  (クリア目標 ${CLEAR_SCORE})`);
+          this.collectionText.setText(`収集: ${this.collected.size} / ${POSES.length * FACES.length}`);
+        }
+
+        endGame(cleared) {
+          if (this.finished) return;
+          this.finished = true;
+          this.poseTimer.remove(false);
+          this.clockTimer.remove(false);
+
+          const allCollected = this.collected.size >= POSES.length * FACES.length;
+          const finalClear = cleared || (allCollected && this.score >= CLEAR_SCORE);
+          const line1 = finalClear ? '完全収集達成!' : '撮影終了';
+          const line2 = `スコア ${this.score} / 収集 ${this.collected.size}枚`;
+          const line3 = finalClear ? '伝説の舞台記録官に昇格!' : 'お題ポーズを狙って再挑戦';
+
+          this.resultPanel.setVisible(true);
+          this.resultText.setText(`${line1}\n${line2}\n${line3}`).setVisible(true);
+        }
+      }
+
+      new Phaser.Game({
+        type: Phaser.AUTO,
+        parent: 'game',
+        width: W,
+        height: H,
+        backgroundColor: '#201309',
+        scene: [MainScene],
+        scale: {
+          mode: Phaser.Scale.FIT,
+          autoCenter: Phaser.Scale.CENTER_BOTH
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
