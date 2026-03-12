@@ -48,7 +48,6 @@ const ARROW_MAX_DRAG  = 120;    // 引っ張りの最大距離（px）
 const ARROW_RANGE_MAX = 1200;   // 最大飛距離
 const ARROW_RANGE_EXP = 1.5;    // 弱い引きで飛距離を短くする補正
 const SPECIAL_ARROW_INTERVAL = 3; // 特殊矢の出現間隔
-const FALL_GAMEOVER_DISTANCE = 220; // 落下開始後に許容する戻り距離
 const BALLOON_MOVE_SPEED_MIN = 0.0012; // 移動風船の最小速度
 const BALLOON_MOVE_SPEED_MAX = 0.0022; // 移動風船の最大速度
 const WIND_STRENGTH_WEAK = 0.16;  // 風の弱補正
@@ -303,6 +302,7 @@ class GameScene extends Phaser.Scene {
     this.dragStart  = { x: 0, y: 0 };
     this.flightDistanceLeft = 0;      // 残り飛距離
     this.fallStartY = 0;              // 落下開始時のY
+    this.stageStartY = 0;             // ステージ開始位置のY
     this.arrowColliders = [];         // 矢に紐づく衝突判定
     this.woodSpawnIndex = 0;          // 木バリエーションの固定シーケンス用
     this.arrowTypeText = null;        // シーン再開始時の破棄済み参照をクリア
@@ -353,6 +353,7 @@ class GameScene extends Phaser.Scene {
     // ---- 矢の生成（最初の発射台から） ----
     const firstWood = this.woodGroup.getChildren()[0];
     this.currentAnchor = { x: firstWood.x, y: firstWood.y }; // 次の発射基準点
+    this.stageStartY = firstWood.y - 28;
     this.arrow = null;
     this.spawnArrow();
 
@@ -799,12 +800,13 @@ class GameScene extends Phaser.Scene {
       overlay.destroy();
       text.destroy();
       if (isFinal) {
-        this.scene.start('GameOver', { score: this.score, clear: true });
+        this.scene.start('GameOver', { score: this.score, clear: true, stageIndex: this.stageIndex });
       } else {
+        const carryArrows = Math.min(MAX_ARROWS, INITIAL_ARROWS + this.arrowCount);
         this.scene.restart({
           stageIndex: this.stageIndex + 1,
           score: this.score,
-          arrowCount: this.arrowCount
+          arrowCount: carryArrows
         });
       }
     });
@@ -1337,7 +1339,7 @@ class GameScene extends Phaser.Scene {
     if (this.arrowCount <= 0) {
       // ゲームオーバー
       this.time.delayedCall(300, () => {
-        this.scene.start('GameOver', { score: this.score });
+        this.scene.start('GameOver', { score: this.score, stageIndex: this.stageIndex });
       });
     } else {
       // 少し待って次の矢を準備
@@ -1613,15 +1615,15 @@ class GameScene extends Phaser.Scene {
       this.arrow.setRotation(Math.atan2(vy, vx));
     }
 
-    // 落下中は、落下開始地点から一定距離戻ったらゲームオーバー
-    if (this.isFalling && this.arrow.y > this.fallStartY + FALL_GAMEOVER_DISTANCE) {
-      this.scene.start('GameOver', { score: this.score });
+    // 落下中は、ステージ開始位置まで戻ったらゲームオーバー
+    if (this.isFalling && this.arrow.y >= this.stageStartY) {
+      this.scene.start('GameOver', { score: this.score, stageIndex: this.stageIndex });
       return;
     }
 
     // 念のため、画面下に大きく落ちた場合もゲームオーバー
     if (this.arrow.y > this.cameras.main.scrollY + GAME_H + 100) {
-      this.scene.start('GameOver', { score: this.score });
+      this.scene.start('GameOver', { score: this.score, stageIndex: this.stageIndex });
     }
 
   }
@@ -1720,6 +1722,7 @@ class GameOverScene extends Phaser.Scene {
   init(data) {
     this.finalScore = data.score || 0;
     this.isClear = !!data.clear;
+    this.stageIndex = data.stageIndex || 1;
   }
 
   create() {
@@ -1775,7 +1778,11 @@ class GameOverScene extends Phaser.Scene {
     const restartGame = () => {
       if (isRestarting) return;
       isRestarting = true;
-      this.scene.start('Game');
+      this.scene.start('Game', {
+        stageIndex: this.stageIndex,
+        score: 0,
+        arrowCount: INITIAL_ARROWS
+      });
     };
 
     btnBg.on('pointerdown', restartGame);
